@@ -1,260 +1,224 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import React from 'react';
+import { Link } from 'react-router-dom';
 import { 
-  Plus, 
   Users, 
+  Building2, 
+  Receipt, 
   DollarSign, 
   Calendar,
-  ArrowRight,
-  Search,
-  Filter,
-  MoreVertical,
-  Edit,
-  Trash2,
-  Eye
+  TrendingUp,
+  AlertCircle
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { useRoom } from '../contexts/RoomContext';
 
-const Dashboard = () => {
-  const { user, isAuthenticated } = useAuth();
-  const { rooms, loading } = useRoom();
-  const navigate = useNavigate();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      navigate('/');
-    }
-  }, [isAuthenticated, navigate]);
-
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  const filteredRooms = rooms.filter(room => {
-    const matchesSearch = room.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         room.description?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || 
-                         (filterStatus === 'active' && room.expenses.length > 0) ||
-                         (filterStatus === 'inactive' && room.expenses.length === 0);
-    return matchesSearch && matchesFilter;
+const Dashboard = ({ tenants, properties, bills }) => {
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  
+  // Calculate statistics
+  const totalTenants = tenants.length;
+  const totalProperties = properties.length;
+  const totalBills = bills.length;
+  
+  const monthlyBills = bills.filter(bill => {
+    const billDate = new Date(bill.dueDate);
+    return billDate.getMonth() === currentMonth && billDate.getFullYear() === currentYear;
+  });
+  
+  const totalMonthlyRevenue = monthlyBills.reduce((sum, bill) => sum + bill.amount, 0);
+  const overdueBills = bills.filter(bill => {
+    const dueDate = new Date(bill.dueDate);
+    return dueDate < new Date() && !bill.paid;
   });
 
-  const totalExpenses = rooms.reduce((sum, room) => sum + room.expenses.length, 0);
-  const totalAmount = rooms.reduce((sum, room) => 
-    sum + room.expenses.reduce((roomSum, expense) => roomSum + expense.amount, 0), 0
-  );
-
-  const recentExpenses = rooms
-    .flatMap(room => room.expenses.map(expense => ({ ...expense, roomName: room.name })))
+  // Get recent bills
+  const recentBills = bills
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 5);
 
+  // Get tenants with upcoming move-ins
+  const upcomingMoveIns = tenants.filter(tenant => {
+    const moveInDate = new Date(tenant.moveInDate);
+    const today = new Date();
+    const diffTime = moveInDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 0 && diffDays <= 30;
+  });
+
+  const StatCard = ({ title, value, icon: Icon, color, link }) => (
+    <div className={`bg-white rounded-lg shadow-md p-6 border-l-4 ${color}`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-600">{title}</p>
+          <p className="text-2xl font-bold text-gray-900">{value}</p>
+        </div>
+        <div className="p-3 bg-gray-100 rounded-full">
+          <Icon className="h-6 w-6 text-gray-600" />
+        </div>
+      </div>
+      {link && (
+        <Link to={link} className="text-sm text-blue-600 hover:text-blue-800 mt-2 inline-block">
+          View all →
+        </Link>
+      )}
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-secondary-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-secondary-900 mb-2">
-            Welcome back, {user?.name || 'User'}!
-          </h1>
-          <p className="text-secondary-600">
-            Manage your shared expenses and keep track of your rooms.
-          </p>
-        </div>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-600 mt-2">Welcome to your landlord management dashboard</p>
+      </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="card"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-secondary-600">Total Rooms</p>
-                <p className="text-2xl font-bold text-secondary-900">{rooms.length}</p>
-              </div>
-              <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center">
-                <Users className="w-6 h-6 text-primary-600" />
-              </div>
-            </div>
-          </motion.div>
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard
+          title="Total Tenants"
+          value={totalTenants}
+          icon={Users}
+          color="border-blue-500"
+          link="/tenants"
+        />
+        <StatCard
+          title="Properties"
+          value={totalProperties}
+          icon={Building2}
+          color="border-green-500"
+          link="/properties"
+        />
+        <StatCard
+          title="Monthly Revenue"
+          value={`$${totalMonthlyRevenue.toLocaleString()}`}
+          icon={DollarSign}
+          color="border-yellow-500"
+        />
+        <StatCard
+          title="Overdue Bills"
+          value={overdueBills.length}
+          icon={AlertCircle}
+          color="border-red-500"
+          link="/bills"
+        />
+      </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            className="card"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-secondary-600">Total Expenses</p>
-                <p className="text-2xl font-bold text-secondary-900">{totalExpenses}</p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                <DollarSign className="w-6 h-6 text-green-600" />
-              </div>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            className="card"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-secondary-600">Total Amount</p>
-                <p className="text-2xl font-bold text-secondary-900">
-                  ${totalAmount.toFixed(2)}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Search and Filter */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-6">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-secondary-400 w-5 h-5" />
-            <input
-              type="text"
-              placeholder="Search rooms..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="input-field pl-10"
-            />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Recent Bills */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">Recent Bills</h2>
+            <Link to="/bills" className="text-sm text-blue-600 hover:text-blue-800">
+              View all
+            </Link>
           </div>
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="input-field max-w-xs"
-          >
-            <option value="all">All Rooms</option>
-            <option value="active">Active Rooms</option>
-            <option value="inactive">Inactive Rooms</option>
-          </select>
-        </div>
-
-        {/* Rooms Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-          {/* Create New Room Card */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5 }}
-            className="card border-2 border-dashed border-secondary-300 hover:border-primary-400 transition-colors duration-200 cursor-pointer"
-            onClick={() => navigate('/create-room')}
-          >
-            <div className="text-center py-8">
-              <div className="w-12 h-12 bg-primary-100 rounded-lg flex items-center justify-center mx-auto mb-4">
-                <Plus className="w-6 h-6 text-primary-600" />
-              </div>
-              <h3 className="text-lg font-semibold text-secondary-900 mb-2">
-                Create New Room
-              </h3>
-              <p className="text-secondary-600">
-                Start a new room to manage shared expenses
-              </p>
-            </div>
-          </motion.div>
-
-          {/* Existing Rooms */}
-          {filteredRooms.map((room, index) => (
-            <motion.div
-              key={room.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              className="card hover:shadow-lg transition-shadow duration-200"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-secondary-900 mb-1">
-                    {room.name}
-                  </h3>
-                  <p className="text-sm text-secondary-600">
-                    {room.members.length} members
-                  </p>
-                </div>
-                <div className="relative">
-                  <button className="p-1 hover:bg-secondary-100 rounded">
-                    <MoreVertical className="w-4 h-4 text-secondary-400" />
-                  </button>
-                </div>
-              </div>
-
-              <p className="text-secondary-600 text-sm mb-4">
-                {room.description || 'No description'}
-              </p>
-
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-sm text-secondary-600">
-                  {room.expenses.length} expenses
-                </div>
-                <div className="text-sm font-semibold text-secondary-900">
-                  ${room.expenses.reduce((sum, expense) => sum + expense.amount, 0).toFixed(2)}
-                </div>
-              </div>
-
-              <Link
-                to={`/room/${room.id}`}
-                className="btn-primary w-full flex items-center justify-center space-x-2"
-              >
-                <span>View Room</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Recent Activity */}
-        {recentExpenses.length > 0 && (
-          <div className="card">
-            <h3 className="text-lg font-semibold text-secondary-900 mb-4">
-              Recent Activity
-            </h3>
-            <div className="space-y-3">
-              {recentExpenses.map((expense) => (
-                <div
-                  key={expense.id}
-                  className="flex items-center justify-between p-3 bg-secondary-50 rounded-lg"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
-                      <DollarSign className="w-4 h-4 text-primary-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-secondary-900">
-                        {expense.description}
-                      </p>
-                      <p className="text-sm text-secondary-600">
-                        {expense.roomName} • {new Date(expense.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
+          <div className="space-y-3">
+            {recentBills.length > 0 ? (
+              recentBills.map((bill) => (
+                <div key={bill.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="font-medium text-gray-900">
+                      {tenants.find(t => t.id === bill.tenantId)?.name || 'Unknown Tenant'}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      Due: {new Date(bill.dueDate).toLocaleDateString()}
+                    </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-secondary-900">
-                      ${expense.amount.toFixed(2)}
-                    </p>
-                    <p className="text-sm text-secondary-600">
-                      {expense.paidBy}
-                    </p>
+                    <p className="font-semibold text-gray-900">${bill.amount}</p>
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      bill.paid 
+                        ? 'bg-green-100 text-green-800' 
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {bill.paid ? 'Paid' : 'Unpaid'}
+                    </span>
                   </div>
                 </div>
-              ))}
-            </div>
+              ))
+            ) : (
+              <p className="text-gray-500 text-center py-4">No bills yet</p>
+            )}
           </div>
-        )}
+        </div>
+
+        {/* Upcoming Move-ins */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">Upcoming Move-ins</h2>
+            <Link to="/tenants" className="text-sm text-blue-600 hover:text-blue-800">
+              View all
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {upcomingMoveIns.length > 0 ? (
+              upcomingMoveIns.map((tenant) => {
+                const moveInDate = new Date(tenant.moveInDate);
+                const today = new Date();
+                const diffTime = moveInDate - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                
+                return (
+                  <div key={tenant.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p className="font-medium text-gray-900">{tenant.name}</p>
+                      <p className="text-sm text-gray-600">
+                        {properties.find(p => p.id === tenant.propertyId)?.address || 'Unknown Property'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-gray-600">
+                        {moveInDate.toLocaleDateString()}
+                      </p>
+                      <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
+                        {diffDays} days
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="text-gray-500 text-center py-4">No upcoming move-ins</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Link
+            to="/tenants"
+            className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Users className="h-6 w-6 text-blue-600 mr-3" />
+            <div>
+              <p className="font-medium text-gray-900">Add New Tenant</p>
+              <p className="text-sm text-gray-600">Register a new tenant</p>
+            </div>
+          </Link>
+          
+          <Link
+            to="/properties"
+            className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Building2 className="h-6 w-6 text-green-600 mr-3" />
+            <div>
+              <p className="font-medium text-gray-900">Add Property</p>
+              <p className="text-sm text-gray-600">Register a new property</p>
+            </div>
+          </Link>
+          
+          <Link
+            to="/bills"
+            className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <Receipt className="h-6 w-6 text-yellow-600 mr-3" />
+            <div>
+              <p className="font-medium text-gray-900">Generate Bills</p>
+              <p className="text-sm text-gray-600">Create new bills</p>
+            </div>
+          </Link>
+        </div>
       </div>
     </div>
   );

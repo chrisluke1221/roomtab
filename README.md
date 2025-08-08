@@ -1,40 +1,54 @@
-# RoomTab - Split Bills with Friends
+# Landlord Pro - Bill Automation App
 
-A modern web application for managing shared expenses with roommates and friends. RoomTab makes it easy to track who owes what and settle up without the awkward conversations.
+A comprehensive web application for landlords to manage tenants, properties, and automatically calculate bills based on tenant move-in dates.
 
-## 🌟 Features
+## 🏠 Features
 
-### Core Functionality
-- **Room Management**: Create and join rooms to organize shared expenses
-- **Expense Tracking**: Add and categorize expenses with detailed descriptions
-- **Smart Splitting**: Automatically calculate who owes what with intelligent splitting algorithms
-- **Balance Tracking**: Real-time balance calculations for each member
-- **Member Management**: Add and manage room members easily
+### **Dashboard**
+- Overview statistics (total tenants, properties, monthly revenue, overdue bills)
+- Recent bills tracking
+- Upcoming move-in notifications
+- Quick action buttons for common tasks
 
-### User Experience
-- **Modern UI**: Beautiful, responsive design with smooth animations
-- **Mobile Friendly**: Works perfectly on all devices
-- **Real-time Updates**: Instant updates when expenses are added or modified
-- **Intuitive Navigation**: Easy-to-use interface with clear navigation
+### **Tenant Management**
+- Add, edit, and delete tenants
+- Track move-in dates and lease information
+- Monitor days since/until move-in
+- Search and filter tenants
+- Property assignment and rent amount tracking
 
-### Technical Features
-- **Progressive Web App**: Installable on mobile devices
-- **Offline Support**: Works without internet connection
-- **Local Storage**: Data persists between sessions
-- **Performance Optimized**: Fast loading and smooth interactions
+### **Property Management**
+- Comprehensive property details (address, type, bedrooms, bathrooms, square footage)
+- Occupancy rate tracking
+- Current tenant information
+- Monthly rent configuration
+
+### **Automated Bill Generation**
+- **Move-in Date Based Calculation**: Bills are automatically calculated based on tenant move-in dates
+- **Bulk Bill Generation**: Generate bills for all eligible tenants for any month/year
+- **Multiple Bill Types**: Rent, utilities, late fees, deposits, and other charges
+- **Duplicate Prevention**: Smart system prevents duplicate bill generation
+- **Payment Tracking**: Mark bills as paid/unpaid with timestamps
+
+### **Bill Management**
+- Real-time bill status tracking (paid, unpaid, overdue)
+- Search and filter bills by tenant, property, or description
+- Manual bill creation and editing
+- Payment history and due date monitoring
+- Financial statistics and reporting
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 - Node.js (version 14 or higher)
-- npm or yarn package manager
+- npm or yarn
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/roomtab.git
-   cd roomtab
+   git clone <repository-url>
+   cd landlord-pro
    ```
 
 2. **Install dependencies**
@@ -48,174 +62,181 @@ A modern web application for managing shared expenses with roommates and friends
    ```
 
 4. **Open your browser**
-   Navigate to `http://localhost:3000` to see the application
-
-### Building for Production
-
-1. **Create a production build**
-   ```bash
-   npm run build
-   ```
-
-2. **Serve the build**
-   ```bash
-   npm install -g serve
-   serve -s build
-   ```
+   Navigate to `http://localhost:3000`
 
 ## 📱 Usage Guide
 
-### Creating a Room
-1. Click "Create Room" from the dashboard
-2. Enter a descriptive room name (e.g., "Apartment 3B", "Trip to Paris")
-3. Add optional description
-4. Add room members by name and email
-5. Click "Create Room" to finish
+### Adding Properties
+1. Navigate to the **Properties** page
+2. Click **"Add Property"**
+3. Fill in property details (address, type, bedrooms, bathrooms, monthly rent)
+4. Save the property
 
-### Adding Expenses
-1. Navigate to your room
-2. Click "Add Expense" button
-3. Fill in the expense details:
-   - Description (e.g., "Groceries", "Rent")
-   - Amount
-   - Who paid
-   - Who to split with
-4. Click "Add Expense" to save
+### Adding Tenants
+1. Go to the **Tenants** page
+2. Click **"Add Tenant"**
+3. Enter tenant information including:
+   - Name, email, phone
+   - Property assignment
+   - **Move-in date** (critical for bill calculation)
+   - Rent amount and deposit
+   - Lease end date (optional)
+4. Save the tenant
 
-### Managing Balances
-- View current balances in the "Balances" tab
-- Positive amounts show money owed to you
-- Negative amounts show money you owe
-- All calculations are automatic and real-time
+### Generating Bills
+1. Navigate to the **Bills** page
+2. Click **"Generate Bills"**
+3. Select the month and year for bill generation
+4. Choose options:
+   - Include utilities (with amount)
+   - Include late fees for overdue bills
+5. Click **"Generate Bills"**
 
-### Joining Existing Rooms
-1. Click "Join Room" from the dashboard
-2. Enter the room code provided by the room creator
-3. You'll be added to the room automatically
+The system will automatically:
+- Only generate bills for tenants who have moved in by the selected month
+- Create rent bills based on tenant's rent amount
+- Add utilities if enabled
+- Add late fees for overdue bills if enabled
+- Prevent duplicate bills for the same month
 
-## 🛠️ Technology Stack
+### Managing Bills
+- **View all bills** in the bills table
+- **Search and filter** by status (paid, unpaid, overdue)
+- **Mark bills as paid/unpaid** with one click
+- **Edit bill details** if needed
+- **Delete bills** if necessary
 
-- **Frontend**: React 18 with Hooks
-- **Styling**: Tailwind CSS with custom design system
-- **Animations**: Framer Motion for smooth transitions
-- **Icons**: Lucide React for consistent iconography
-- **Routing**: React Router for navigation
-- **State Management**: React Context API
-- **Build Tool**: Create React App
+## 💡 Key Features Explained
 
-## 📁 Project Structure
+### Move-in Date Based Billing
+The app automatically calculates which tenants should receive bills based on their move-in dates. For example:
+- Tenant moves in on March 15, 2024
+- Bills will be generated for March 2024 and all subsequent months
+- No bills will be generated for January or February 2024
 
+### Smart Bill Generation
+- **Eligibility Check**: Only tenants who have moved in by the end of the previous month receive bills
+- **Duplicate Prevention**: System checks for existing bills before creating new ones
+- **Flexible Options**: Include utilities, late fees, and other charges as needed
+
+### Real-time Tracking
+- **Payment Status**: Track paid vs unpaid bills
+- **Overdue Alerts**: Highlight overdue bills with red background
+- **Financial Summary**: View total amounts, paid amounts, and outstanding balances
+
+## 🛠️ Technical Details
+
+### Built With
+- **React 18** - Modern React with hooks
+- **React Router** - Client-side routing
+- **Tailwind CSS** - Utility-first CSS framework
+- **Lucide React** - Beautiful icons
+- **Local Storage** - Data persistence
+
+### Data Structure
+```javascript
+// Tenant
+{
+  id: string,
+  name: string,
+  email: string,
+  phone: string,
+  propertyId: string,
+  moveInDate: string, // ISO date string
+  rentAmount: number,
+  depositAmount: number,
+  leaseEndDate: string, // optional
+  notes: string,
+  createdAt: string,
+  updatedAt: string
+}
+
+// Property
+{
+  id: string,
+  address: string,
+  city: string,
+  state: string,
+  zipCode: string,
+  propertyType: string,
+  bedrooms: number,
+  bathrooms: number,
+  squareFeet: number,
+  monthlyRent: number,
+  notes: string,
+  createdAt: string,
+  updatedAt: string
+}
+
+// Bill
+{
+  id: string,
+  tenantId: string,
+  propertyId: string,
+  billType: 'rent' | 'utilities' | 'late_fee' | 'deposit' | 'other',
+  amount: number,
+  dueDate: string, // ISO date string
+  description: string,
+  paid: boolean,
+  paidDate: string | null,
+  notes: string,
+  createdAt: string,
+  updatedAt: string
+}
 ```
-src/
-├── components/          # Reusable UI components
-│   ├── Header.js       # Navigation header
-│   └── Footer.js       # Site footer
-├── contexts/           # React Context providers
-│   ├── AuthContext.js  # User authentication state
-│   └── RoomContext.js  # Room and expense management
-├── pages/              # Main application pages
-│   ├── Home.js         # Landing page
-│   ├── Dashboard.js    # User dashboard
-│   ├── Room.js         # Room management interface
-│   ├── CreateRoom.js   # Room creation form
-│   ├── JoinRoom.js     # Room joining interface
-│   └── Login.js        # User authentication
-├── App.js              # Main application component
-├── index.js            # Application entry point
-└── index.css           # Global styles and Tailwind imports
-```
 
-## 🎨 Design System
+## 📊 Dashboard Statistics
 
-### Colors
-- **Primary**: Blue gradient (#3B82F6 to #1D4ED8)
-- **Secondary**: Gray scale (#64748B to #0F172A)
-- **Success**: Green (#10B981)
-- **Error**: Red (#EF4444)
-- **Warning**: Yellow (#F59E0B)
+The dashboard provides real-time insights:
+- **Total Tenants**: Number of registered tenants
+- **Properties**: Number of rental properties
+- **Monthly Revenue**: Sum of all bills for current month
+- **Overdue Bills**: Number of unpaid bills past due date
 
-### Typography
-- **Font**: Inter (Google Fonts)
-- **Weights**: 300, 400, 500, 600, 700
-- **Sizes**: Responsive scale from 12px to 48px
+## 🔧 Customization
 
-### Components
-- **Cards**: White background with subtle shadows
-- **Buttons**: Primary and secondary variants with hover states
-- **Inputs**: Consistent styling with focus states
-- **Modals**: Overlay dialogs with smooth animations
+### Adding New Bill Types
+1. Edit the `billTypes` array in `src/pages/Bills.js`
+2. Add your new bill type with appropriate styling
 
-## 🔧 Development
-
-### Available Scripts
-
-- `npm start` - Start development server
-- `npm run build` - Create production build
-- `npm test` - Run test suite
-- `npm run eject` - Eject from Create React App
-- `npm run lint` - Run ESLint
-- `npm run lint:fix` - Fix ESLint errors
-
-### Code Style
-
-This project uses:
-- **ESLint** for code linting
-- **Prettier** for code formatting
-- **React Hooks** for state management
-- **Functional Components** with hooks
-- **Tailwind CSS** for styling
+### Modifying Bill Generation Logic
+The bill generation logic is in the `handleGenerateBills` function in `src/pages/Bills.js`. You can customize:
+- Eligibility criteria
+- Bill calculation formulas
+- Additional bill types
+- Late fee calculations
 
 ## 🚀 Deployment
 
-### Netlify (Recommended)
-1. Connect your GitHub repository to Netlify
-2. Set build command: `npm run build`
-3. Set publish directory: `build`
-4. Deploy automatically on push to main branch
+### Build for Production
+```bash
+npm run build
+```
 
-### Vercel
-1. Install Vercel CLI: `npm i -g vercel`
-2. Run `vercel` in project directory
-3. Follow prompts to deploy
-
-### Other Platforms
-- **Firebase Hosting**: Use `firebase deploy`
-- **AWS S3**: Upload build folder to S3 bucket
-- **GitHub Pages**: Use `gh-pages` package
+### Deploy to Netlify/Vercel
+1. Build the project
+2. Upload the `build` folder to your hosting platform
+3. Configure environment variables if needed
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes and commit: `git commit -m 'Add feature'`
-4. Push to branch: `git push origin feature-name`
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
 5. Submit a pull request
 
-### Development Guidelines
-- Follow the existing code style
-- Add tests for new features
-- Update documentation as needed
-- Ensure mobile responsiveness
-- Test across different browsers
+## 📝 License
 
-## 📄 License
+This project is licensed under the MIT License.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 🆘 Support
 
-## 🙏 Acknowledgments
-
-- **React Team** for the amazing framework
-- **Tailwind CSS** for the utility-first CSS framework
-- **Framer Motion** for smooth animations
-- **Lucide** for beautiful icons
-- **Create React App** for the development setup
-
-## 📞 Support
-
-- **Email**: support@roomtab.com
-- **GitHub Issues**: [Create an issue](https://github.com/yourusername/roomtab/issues)
-- **Documentation**: [View docs](https://roomtab.netlify.app/docs)
+For support or questions:
+- Create an issue in the repository
+- Check the documentation above
+- Review the code comments for implementation details
 
 ---
 
-Made with ❤️ for roommates everywhere
+**Landlord Pro** - Making property management simple and automated! 🏠✨

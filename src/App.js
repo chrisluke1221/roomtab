@@ -1,113 +1,91 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import Header from './components/Header';
-import Footer from './components/Footer';
-import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
-import Room from './pages/Room';
-import CreateRoom from './pages/CreateRoom';
-import JoinRoom from './pages/JoinRoom';
-import Login from './pages/Login';
-import { RoomProvider } from './contexts/RoomContext';
-import { AuthProvider } from './contexts/AuthContext';
+import Tenants from './pages/Tenants';
+import Bills from './pages/Bills';
+import Properties from './pages/Properties';
+import Navigation from './components/Navigation';
+import './App.css';
 
 function App() {
+  const [tenants, setTenants] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const [bills, setBills] = useState([]);
+
+  // Load data from localStorage on app start
+  useEffect(() => {
+    const savedTenants = localStorage.getItem('landlord-tenants');
+    const savedProperties = localStorage.getItem('landlord-properties');
+    const savedBills = localStorage.getItem('landlord-bills');
+
+    if (savedTenants) setTenants(JSON.parse(savedTenants));
+    if (savedProperties) setProperties(JSON.parse(savedProperties));
+    if (savedBills) setBills(JSON.parse(savedBills));
+  }, []);
+
+  // Save data to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('landlord-tenants', JSON.stringify(tenants));
+  }, [tenants]);
+
+  useEffect(() => {
+    localStorage.setItem('landlord-properties', JSON.stringify(properties));
+  }, [properties]);
+
+  useEffect(() => {
+    localStorage.setItem('landlord-bills', JSON.stringify(bills));
+  }, [bills]);
+
   return (
-    <AuthProvider>
-      <RoomProvider>
-        <Router>
-          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-            <Header />
-            <main className="flex-1">
-              <AnimatePresence mode="wait">
-                <Routes>
-                  <Route 
-                    path="/" 
-                    element={
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <Home />
-                      </motion.div>
-                    } 
-                  />
-                  <Route 
-                    path="/dashboard" 
-                    element={
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <Dashboard />
-                      </motion.div>
-                    } 
-                  />
-                  <Route 
-                    path="/room/:roomId" 
-                    element={
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <Room />
-                      </motion.div>
-                    } 
-                  />
-                  <Route 
-                    path="/create-room" 
-                    element={
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <CreateRoom />
-                      </motion.div>
-                    } 
-                  />
-                  <Route 
-                    path="/join-room" 
-                    element={
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <JoinRoom />
-                      </motion.div>
-                    } 
-                  />
-                  <Route 
-                    path="/login" 
-                    element={
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -20 }}
-                        transition={{ duration: 0.3 }}
-                      >
-                        <Login />
-                      </motion.div>
-                    } 
-                  />
-                </Routes>
-              </AnimatePresence>
-            </main>
-            <Footer />
-          </div>
-        </Router>
-      </RoomProvider>
-    </AuthProvider>
+    <Router>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="container mx-auto px-4 py-8">
+          <Routes>
+            <Route 
+              path="/" 
+              element={
+                <Dashboard 
+                  tenants={tenants}
+                  properties={properties}
+                  bills={bills}
+                />
+              } 
+            />
+            <Route 
+              path="/tenants" 
+              element={
+                <Tenants 
+                  tenants={tenants}
+                  setTenants={setTenants}
+                  properties={properties}
+                />
+              } 
+            />
+            <Route 
+              path="/properties" 
+              element={
+                <Properties 
+                  properties={properties}
+                  setProperties={setProperties}
+                />
+              } 
+            />
+            <Route 
+              path="/bills" 
+              element={
+                <Bills 
+                  bills={bills}
+                  setBills={setBills}
+                  tenants={tenants}
+                  properties={properties}
+                />
+              } 
+            />
+          </Routes>
+        </div>
+      </div>
+    </Router>
   );
 }
 
