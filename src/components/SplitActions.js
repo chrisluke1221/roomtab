@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ExternalLink, Copy, ShieldOff, CheckCircle2, RotateCcw, Mail, MailCheck, AlertTriangle } from 'lucide-react';
+import Money from './Money';
 
 // Fast, CSS-only tooltip — replaces the native title= attribute, whose
 // browser-default hover delay (~1-1.5s+) reads as sluggish on icon-only
@@ -42,14 +43,70 @@ const NoAttachmentWarning = ({ onConfirm, onCancel }) => (
   </div>
 );
 
+// Round 2: inline amount-entry chip for recording a full or partial payment
+// — replaces the old instant one-click "mark as paid" toggle, since a
+// landlord now needs to say *how much* was paid, not just paid-or-not.
+// Follows the design system's inline-edit-chip spec (docs/design-system.md).
+const PaymentChip = ({ split, onSave, onCancel }) => {
+  const remaining = Number(split.owed_amount) - Number(split.amount_paid || 0);
+  const [amount, setAmount] = useState(String(Number(split.amount_paid || 0) > 0 ? split.amount_paid : remaining));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    const parsed = parseFloat(amount);
+    if (Number.isNaN(parsed) || parsed < 0) {
+      setError('Enter a valid amount');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave(parsed);
+    } catch (err) {
+      console.error('Failed to record payment:', err);
+      setError("Couldn't save — try again");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-secondary-50 border border-secondary-200 rounded-lg px-3 py-2">
+      <div className="flex items-center space-x-2">
+        <label className="text-xs text-secondary-600 whitespace-nowrap">
+          Amount paid (of <Money dollars={split.owed_amount} />)
+        </label>
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          autoFocus
+          className="input-field text-sm py-1 px-2 w-24"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <button onClick={handleSave} disabled={saving} className="btn-primary text-xs px-3 py-1">
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        <button onClick={onCancel} className="btn-secondary text-xs px-3 py-1">
+          Cancel
+        </button>
+      </div>
+      {error && <p className="text-xs text-danger-600 mt-1">{error}</p>}
+    </div>
+  );
+};
+
 // Shared by the desktop splits table and the mobile stacked-card layout so
 // the five per-split actions aren't duplicated in two places.
 // CHR-26: billHasAttachment — whether the parent bill has an uploaded file.
 //   If false, clicking Send shows a confirmation prompt before proceeding.
-const SplitActions = ({ split, sendingSplitId, onRevoke, onSetStatus, onSendEmail, billHasAttachment }) => {
+const SplitActions = ({ split, sendingSplitId, onRevoke, onSetStatus, onRecordPayment, onSendEmail, billHasAttachment }) => {
   const [revoking, setRevoking] = useState(false);
   const [revokeFeedback, setRevokeFeedback] = useState(null); // 'success' | 'error' | null
   const [statusPending, setStatusPending] = useState(false);
+  const [showPaymentChip, setShowPaymentChip] = useState(false);
   // CHR-26: track whether we're showing the no-attachment confirmation prompt
   const [showNoAttachmentWarning, setShowNoAttachmentWarning] = useState(false);
 
@@ -80,6 +137,11 @@ const SplitActions = ({ split, sendingSplitId, onRevoke, onSetStatus, onSendEmai
     } finally {
       setStatusPending(false);
     }
+  };
+
+  const handleSavePayment = async (amount) => {
+    await onRecordPayment(split.id, amount);
+    setShowPaymentChip(false);
   };
 
   // CHR-26: intercept the send click — if no attachment, show the warning
@@ -138,7 +200,7 @@ const SplitActions = ({ split, sendingSplitId, onRevoke, onSetStatus, onSendEmai
           <span className="text-xs text-danger-600 whitespace-nowrap">Couldn't revoke link</span>
         )}
         {split.status === 'paid' ? (
-          <Tip label="Reset to pending">
+          <Tip label="Reset to no payment recorded">
             <button
               onClick={() => handleStatusClick('pending')}
               disabled={statusPending}
@@ -147,14 +209,20 @@ const SplitActions = ({ split, sendingSplitId, onRevoke, onSetStatus, onSendEmai
               <RotateCcw className={`w-4 h-4 ${statusPending ? 'animate-spin' : ''}`} />
             </button>
           </Tip>
+        ) : split.carried_forward_into_split_id ? (
+          // Round 2: this split's remainder already moved to a later bill —
+          // recording more payment against it here would be invisible to the
+          // aggregates (which correctly exclude it) and confusing to read.
+          <Tip label="Resolved via carry-forward — recorded on the newer bill instead">
+            <CheckCircle2 className="w-4 h-4 text-secondary-300" />
+          </Tip>
         ) : (
-          <Tip label="Mark as paid">
+          <Tip label={Number(split.amount_paid || 0) > 0 ? 'Update amount paid' : 'Record payment'}>
             <button
-              onClick={() => handleStatusClick('paid')}
-              disabled={statusPending}
-              className="text-secondary-400 hover:text-success-600 disabled:opacity-50"
+              onClick={() => setShowPaymentChip((v) => !v)}
+              className={`w-4 h-4 ${Number(split.amount_paid || 0) > 0 ? 'text-warning-600' : 'text-secondary-400 hover:text-success-600'}`}
             >
-              <CheckCircle2 className={`w-4 h-4 ${statusPending ? 'animate-pulse' : ''}`} />
+              <CheckCircle2 className="w-4 h-4" />
             </button>
           </Tip>
         )}
@@ -177,6 +245,9 @@ const SplitActions = ({ split, sendingSplitId, onRevoke, onSetStatus, onSendEmai
           onConfirm={handleConfirmSendAnyway}
           onCancel={handleCancelSend}
         />
+      )}
+      {showPaymentChip && (
+        <PaymentChip split={split} onSave={handleSavePayment} onCancel={() => setShowPaymentChip(false)} />
       )}
     </div>
   );

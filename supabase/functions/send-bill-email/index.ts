@@ -37,6 +37,14 @@ const buildEmailHtml = (split, billLink, isOverdue) => {
   const room = escapeHtml(split.room);
   const owedFormatted = `$${Number(split.owed_amount).toFixed(2)}`;
   const totalFormatted = `$${Number(split.bills.total_amount).toFixed(2)}`;
+  const carriedOver = Number(split.carried_over_amount || 0);
+  // Round 2: flag a carry-forward remainder as its own line rather than
+  // folding it silently into the total — the tenant's linked bill page shows
+  // exactly which earlier bill it came from.
+  const carryForwardLine =
+    carriedOver > 0
+      ? `<p style="font-size: 13px; color: #64748b;">Includes $${carriedOver.toFixed(2)} carried over from an earlier unpaid bill — see the full breakdown below.</p>`
+      : '';
 
   if (isOverdue) {
     return `
@@ -49,6 +57,7 @@ const buildEmailHtml = (split, billLink, isOverdue) => {
           <p>Hi ${tenantName},</p>
           <p>Your share of the ${billType} bill for <strong>${split.bills.billing_period_start} to ${split.bills.billing_period_end}</strong> was due on <strong>${split.bills.due_date}</strong> and hasn't been marked as paid yet.</p>
           <p style="font-size: 28px; font-weight: bold; color: #dc2626;">${owedFormatted}</p>
+          ${carryForwardLine}
           <p style="font-size: 13px; color: #64748b;">
             That's ${split.percentage}% of the total ${totalFormatted} bill, based on
             ${split.occupancy_days} day(s) of occupancy with ${split.number_of_occupants} occupant(s) in ${room}.
@@ -71,6 +80,7 @@ const buildEmailHtml = (split, billLink, isOverdue) => {
       <p>Hi ${tenantName},</p>
       <p>Your share of the ${billType} bill for ${split.bills.billing_period_start} to ${split.bills.billing_period_end} is:</p>
       <p style="font-size: 28px; font-weight: bold; color: #4f46e5;">${owedFormatted}</p>
+      ${carryForwardLine}
       <p>That's ${split.percentage}% of the total ${totalFormatted} bill, based on
       ${split.occupancy_days} day(s) of occupancy with ${split.number_of_occupants} occupant(s) in ${room}.</p>
       ${split.bills.due_date ? `<p><strong>Due:</strong> ${split.bills.due_date}</p>` : ''}

@@ -317,6 +317,59 @@ export const PropertyProvider = ({ children }) => {
 
   const reactivateTenant = async (tenantId) => updateTenant(tenantId, { status: 'active' });
 
+  // Round 2 (partial payment + carry-forward): a tenant's true unresolved
+  // remainder across every not-yet-transferred, not-fully-paid UTILITY split
+  // they have — carried_forward_into_split_id null means it hasn't already
+  // been rolled into a later bill (never double-count the same shortfall
+  // twice). Deliberately scoped to utility<->utility only, matching Chris's
+  // exact water-bill scenario — rent arrears never roll into a utility
+  // bill's carry-forward (or vice versa; insertRentBillRow doesn't call
+  // this at all), so a tenant's rent and utility obligations are never
+  // conflated into one number on a bill they didn't ask to see that on.
+  const unresolvedUtilitySplitsForTenant = (tenantId) =>
+    billSplits.filter((s) => {
+      if (s.tenant_id !== tenantId || s.carried_forward_into_split_id || s.status === 'paid') return false;
+      const bill = bills.find((b) => b.id === s.bill_id);
+      return bill?.bill_type !== 'rent';
+    });
+
+  const unresolvedRemainderForTenant = (tenantId) =>
+    unresolvedUtilitySplitsForTenant(tenantId).reduce(
+      (sum, s) => sum + (Number(s.owed_amount) - Number(s.amount_paid || 0)),
+      0
+    );
+
+  const sourceSplitIdsForTenant = (tenantId) => unresolvedUtilitySplitsForTenant(tenantId).map((s) => s.id);
+
+  // Used by createBillWithSplits (utility bills only — see
+  // unresolvedRemainderForTenant): tags each source split that contributed a
+  // carry-forward remainder with the new split's id — an auditable "this old
+  // shortfall now lives in bill X" trail so it can never be swept into a
+  // third bill. Must run against the pre-insert billSplits snapshot (passed
+  // as sourceIdsByTenant), since the just-inserted splits themselves would
+  // otherwise match the same "unresolved" filter.
+  const tagCarriedForwardSources = async (newSplits, sourceIdsByTenant) => {
+    const sourceIdToNewSplitId = new Map();
+    for (const newSplit of newSplits) {
+      if (!(newSplit.carried_over_amount > 0)) continue;
+      for (const sourceId of sourceIdsByTenant.get(newSplit.tenant_id) || []) {
+        sourceIdToNewSplitId.set(sourceId, newSplit.id);
+      }
+    }
+    if (sourceIdToNewSplitId.size === 0) return;
+
+    await Promise.all(
+      Array.from(sourceIdToNewSplitId.entries()).map(([sourceId, newSplitId]) =>
+        supabase.from('bill_splits').update({ carried_forward_into_split_id: newSplitId }).eq('id', sourceId)
+      )
+    );
+    setBillSplits((prev) =>
+      prev.map((s) =>
+        sourceIdToNewSplitId.has(s.id) ? { ...s, carried_forward_into_split_id: sourceIdToNewSplitId.get(s.id) } : s
+      )
+    );
+  };
+
   // tenantList override exists for callers (like loadSampleProperty) that
   // create tenants and immediately bill them in the same function — the
   // context's `tenants` closure won't include those until the next render.
@@ -350,13 +403,27 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (billError) throw billError;
 
-    const splitsToInsert = splits.map((s) => ({ ...s, bill_id: bill.id, landlord_id: user.id }));
+    // Snapshot source ids per tenant before this bill's splits exist, so the
+    // carry-forward tagging below can't accidentally match its own new rows.
+    const sourceIdsByTenant = new Map(propertyTenants.map((t) => [t.id, sourceSplitIdsForTenant(t.id)]));
+    const splitsToInsert = splits.map((s) => {
+      const remainder = unresolvedRemainderForTenant(s.tenant_id);
+      return {
+        ...s,
+        bill_id: bill.id,
+        landlord_id: user.id,
+        owed_amount: s.owed_amount + remainder,
+        carried_over_amount: remainder,
+      };
+    });
 
     const { data: insertedSplits, error: splitsError } = await supabase
       .from('bill_splits')
       .insert(splitsToInsert)
       .select();
     if (splitsError) throw splitsError;
+
+    await tagCarriedForwardSources(insertedSplits, sourceIdsByTenant);
 
     setBills((prev) => [bill, ...prev]);
     setBillSplits((prev) => [...prev, ...insertedSplits]);
@@ -395,6 +462,12 @@ export const PropertyProvider = ({ children }) => {
       toUpdate.map(async (s) => {
         const existing = existingByTenantId.get(s.tenant_id);
         const { tenant_id, ...fields } = s;
+        // Preserve any carry-forward this split already absorbed — computeSplits
+        // only knows this bill's own base amount, so re-add the existing
+        // carried_over_amount on top rather than silently stripping it on a
+        // pre-send roster-change recompute.
+        const carriedOver = Number(existing.carried_over_amount || 0);
+        if (carriedOver > 0) fields.owed_amount = Number(fields.owed_amount) + carriedOver;
         const { data, error } = await supabase
           .from('bill_splits')
           .update(fields)
@@ -672,6 +745,10 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (billError) throw billError;
 
+    // Round 2's carry-forward is scoped to utility<->utility only (see
+    // unresolvedRemainderForTenant) — a rent bill never absorbs or
+    // contributes a carried-forward remainder, so rent and utility arrears
+    // never get conflated into one number on either kind of bill.
     const splitsToInsert = charges.map(({ tenant, totalCents: tenantCents, segments }) => ({
       bill_id: bill.id,
       tenant_id: tenant.id,
@@ -886,8 +963,33 @@ export const PropertyProvider = ({ children }) => {
     const updates = { status };
     if (status === 'paid') updates.paid_at = new Date().toISOString();
     if (status === 'pending') {
+      // Undoing a mark-paid/payment mistake should read as "no payment
+      // recorded" rather than leaving a stale amount_paid behind.
       updates.paid_at = null;
       updates.viewed_at = null;
+      updates.amount_paid = 0;
+    }
+    const { data, error } = await supabase
+      .from('bill_splits')
+      .update(updates)
+      .eq('id', splitId)
+      .select()
+      .single();
+    if (error) throw error;
+    setBillSplits((prev) => prev.map((s) => (s.id === splitId ? data : s)));
+    return data;
+  };
+
+  // Round 2: landlord records what a tenant actually paid against a split —
+  // full or partial. Auto-flips status to 'paid' once amount_paid covers
+  // owed_amount; otherwise status is untouched and the UI derives "Partial"
+  // itself, the same way effectiveStatus derives "Overdue".
+  const recordPartialPayment = async (splitId, amountPaid) => {
+    const split = billSplits.find((s) => s.id === splitId);
+    const updates = { amount_paid: amountPaid };
+    if (amountPaid >= Number(split?.owed_amount || 0)) {
+      updates.status = 'paid';
+      updates.paid_at = new Date().toISOString();
     }
     const { data, error } = await supabase
       .from('bill_splits')
@@ -998,6 +1100,7 @@ export const PropertyProvider = ({ children }) => {
     error,
     refresh,
     setBillSplitStatus,
+    recordPartialPayment,
     sendBillEmail,
     revokeSplitToken,
     uploadBillAttachment,
