@@ -773,9 +773,15 @@ export const PropertyProvider = ({ children }) => {
         const charges = buildRentCharges(propertyTenants, ratesList, period.start, period.end);
         if (charges.length === 0) continue;
 
+        // A rent bill needs a real due_date, not null — otherwise it can
+        // never be flagged overdue or trigger a reminder (effectiveStatus
+        // in src/lib/paymentStatus.js can't derive "overdue" without one),
+        // regardless of the tenant's rent frequency. Defaulting to the
+        // period's own end date is the safest choice: it's always a real,
+        // already-known date, and a landlord can still edit it per-bill.
         let inserted;
         try {
-          inserted = await insertRentBillRow(property.id, period.start, period.end, null, charges);
+          inserted = await insertRentBillRow(property.id, period.start, period.end, period.end, charges);
         } catch (err) {
           if (err.code === '23505') {
             // Another concurrent run (StrictMode's double-invoke, or a
