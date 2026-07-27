@@ -36,7 +36,7 @@ const emptyTenant = {
   moveOutDate: '',
   numberOfOccupants: 1,
   rentAmount: '',
-  rentFrequency: 'monthly',
+  rentFrequency: 'weekly',
 };
 // CHR-24: description is required when billType === 'other'
 const emptyBill = { billType: 'electricity', totalAmount: '', periodStart: '', periodEnd: '', dueDate: '', description: '' };
@@ -375,6 +375,38 @@ const PropertyDetail = () => {
       setTenantError('Rent must be a positive amount, or left blank to set later');
       return;
     }
+    // CHR-22 (fixed for real): editing a tenant can also change their rate.
+    // A changed rate always starts a *new* dated rate (via addRentRate) —
+    // it never overwrites history — so warn before proceeding, since this
+    // is exactly the "implications of overriding" the original ticket asked
+    // for but never actually built.
+    if (editingTenantId) {
+      const currentRate = currentRateFor(editingTenantId);
+      const rateChanged = Boolean(
+        rentAmount &&
+          currentRate &&
+          (Math.round(rentAmount * 100) !== currentRate.amount_cents || tenantForm.rentFrequency !== currentRate.frequency)
+      );
+      const isFirstRate = Boolean(rentAmount && !currentRate);
+      if (rateChanged) {
+        setConfirmState({
+          title: 'Start a new rate from today?',
+          message: `This won't change any bill already sent — it starts a new rate effective today (${today()}), and the old rate stays exactly as it was for past bills.`,
+          confirmLabel: 'Save & start new rate',
+          onConfirm: async () => {
+            setConfirmState(null);
+            await saveTenantAndMaybeRate(rentAmount, true);
+          },
+        });
+        return;
+      }
+      await saveTenantAndMaybeRate(rentAmount, isFirstRate);
+      return;
+    }
+    await saveTenantAndMaybeRate(rentAmount, false);
+  };
+
+  const saveTenantAndMaybeRate = async (rentAmount, shouldCreateRate) => {
     setTenantSubmitting(true);
     setTenantError('');
     try {
@@ -388,6 +420,13 @@ const PropertyDetail = () => {
           move_out_date: tenantForm.moveOutDate || null,
           number_of_occupants: tenantForm.numberOfOccupants,
         });
+        if (shouldCreateRate) {
+          await addRentRate(editingTenantId, {
+            amountCents: Math.round(rentAmount * 100),
+            frequency: tenantForm.rentFrequency,
+            effectiveFrom: today(),
+          });
+        }
       } else {
         await createTenant({
           propertyId,
@@ -407,6 +446,10 @@ const PropertyDetail = () => {
   };
 
   const handleEditTenant = (tenant) => {
+    // CHR-22 (fixed for real): pre-populate from the tenant's current open
+    // rate so editing shows what's actually in effect, not a blank field
+    // that looks like there's no rent set at all.
+    const currentRate = currentRateFor(tenant.id);
     setTenantForm({
       name: tenant.name,
       email: tenant.email || '',
@@ -415,8 +458,8 @@ const PropertyDetail = () => {
       moveInDate: tenant.move_in_date,
       moveOutDate: tenant.move_out_date || '',
       numberOfOccupants: tenant.number_of_occupants,
-      rentAmount: '',
-      rentFrequency: 'monthly',
+      rentAmount: currentRate ? String(currentRate.amount_cents / 100) : '',
+      rentFrequency: currentRate ? currentRate.frequency : 'weekly',
     });
     setEditingTenantId(tenant.id);
     setTenantError('');
@@ -1148,36 +1191,36 @@ const PropertyDetail = () => {
                 />
               </div>
             </div>
-            {!editingTenantId && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">
-                <div>
-                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Rent (optional — can set later)</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      className="input-field pl-7"
-                      placeholder="0.00"
-                      value={tenantForm.rentAmount}
-                      onChange={(e) => setTenantForm((p) => ({ ...p, rentAmount: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Frequency</label>
-                  <select
-                    className="input-field"
-                    value={tenantForm.rentFrequency}
-                    onChange={(e) => setTenantForm((p) => ({ ...p, rentFrequency: e.target.value }))}
-                  >
-                    <option value="weekly">Weekly</option>
-                    <option value="fortnightly">Fortnightly</option>
-                    <option value="monthly">Monthly</option>
-                  </select>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">
+              <div>
+                <label className="block text-sm font-medium text-secondary-900 mb-1.5">
+                  {editingTenantId ? 'Rent (leave unchanged to keep the current rate)' : 'Rent (optional — can set later)'}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input-field pl-7"
+                    placeholder="0.00"
+                    value={tenantForm.rentAmount}
+                    onChange={(e) => setTenantForm((p) => ({ ...p, rentAmount: e.target.value }))}
+                  />
                 </div>
               </div>
-            )}
+              <div>
+                <label className="block text-sm font-medium text-secondary-900 mb-1.5">Frequency</label>
+                <select
+                  className="input-field"
+                  value={tenantForm.rentFrequency}
+                  onChange={(e) => setTenantForm((p) => ({ ...p, rentFrequency: e.target.value }))}
+                >
+                  <option value="weekly">Weekly</option>
+                  <option value="fortnightly">Fortnightly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </div>
+            </div>
             {tenantError && <p className="text-danger-600 text-sm">{tenantError}</p>}
             <div className="flex space-x-3">
               <button type="submit" disabled={tenantSubmitting} className="btn-primary">
