@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from './AuthContext';
-import { computeSplits } from '../lib/billSplit';
+import { computeSplits, computeFlatSplitByHeadcount, usesFlatSplit } from '../lib/billSplit';
 import { computeRentForPeriod, ratesOverlap, findOverlappingRate } from '../lib/rentCalc';
 import { earliestGenerationMonthForProperty, buildGenerationPeriods } from '../lib/rentGeneration';
 import { formatLocalDate } from '../lib/dates';
@@ -290,6 +290,30 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (error) throw error;
     setTenants((prev) => prev.map((t) => (t.id === tenantId ? data : t)));
+
+    // Round B: when a move_out_date is being set (or changed), auto-close
+    // the tenant's open-ended rent rate to that date so it doesn't keep
+    // generating charges past move-out. Only close rates that have no
+    // effective_to yet (open-ended) and whose effective_from is on or before
+    // the move-out date — a rate that starts after move-out is already
+    // effectively dead and can be left for the landlord to tidy up.
+    if (updates.move_out_date) {
+      const openRate = rentRates.find(
+        (r) => r.tenant_id === tenantId && !r.effective_to && r.effective_from <= updates.move_out_date
+      );
+      if (openRate) {
+        const { data: closedRate, error: closeError } = await supabase
+          .from('rent_rates')
+          .update({ effective_to: updates.move_out_date })
+          .eq('id', openRate.id)
+          .select()
+          .single();
+        if (!closeError) {
+          setRentRates((prev) => prev.map((r) => (r.id === openRate.id ? closedRate : r)));
+        }
+      }
+    }
+
     const currentRoster = await fetchTenantsForProperty(data.property_id, data);
     await recalcUnlockedBillsForProperty(data.property_id, currentRoster);
     return data;
@@ -381,7 +405,12 @@ export const PropertyProvider = ({ children }) => {
       throw new Error('This property has no active tenants to split the bill across.');
     }
 
-    const splits = computeSplits(propertyTenants, periodStart, periodEnd, totalAmount);
+    // Round C: internet bills use flat per-person splitting (the service is
+    // provisioned for the whole period regardless of when tenants moved in);
+    // all other utility types use occupancy-day-weighted splitting.
+    const splits = usesFlatSplit(billType)
+      ? computeFlatSplitByHeadcount(propertyTenants, periodStart, periodEnd, totalAmount)
+      : computeSplits(propertyTenants, periodStart, periodEnd, totalAmount);
     if (splits.length === 0) {
       throw new Error('No tenant occupancy overlaps this billing period.');
     }
@@ -440,12 +469,21 @@ export const PropertyProvider = ({ children }) => {
   const applyRecomputedSplits = async (bill, tenantList = tenants) => {
     const existingSplits = billSplits.filter((s) => s.bill_id === bill.id);
     const propertyTenants = tenantList.filter((t) => t.property_id === bill.property_id && t.status !== 'former');
-    const newSplits = computeSplits(
-      propertyTenants,
-      bill.billing_period_start,
-      bill.billing_period_end,
-      bill.total_amount
-    );
+    // Round C: use the same split strategy as createBillWithSplits — internet
+    // bills are flat-per-person, everything else is occupancy-day-weighted.
+    const newSplits = usesFlatSplit(bill.bill_type)
+      ? computeFlatSplitByHeadcount(
+          propertyTenants,
+          bill.billing_period_start,
+          bill.billing_period_end,
+          bill.total_amount
+        )
+      : computeSplits(
+          propertyTenants,
+          bill.billing_period_start,
+          bill.billing_period_end,
+          bill.total_amount
+        );
 
     const existingByTenantId = new Map(existingSplits.map((s) => [s.tenant_id, s]));
     const newTenantIds = new Set(newSplits.map((s) => s.tenant_id));
@@ -610,17 +648,23 @@ export const PropertyProvider = ({ children }) => {
     return updatedBill;
   };
 
-  // A rate is blocked from edit/delete once it overlaps a rent bill period
-  // where this tenant's split is already paid — same immutability
-  // principle as bills, applied to the rate that generated them.
-  const rentRateEditGuard = (tenantId, effectiveFrom, effectiveTo) => {
-    const rangeEnd = effectiveTo || '9999-12-31';
-    return bills.some((b) => {
-      if (b.bill_type !== 'rent') return false;
-      const split = billSplits.find((s) => s.bill_id === b.id && s.tenant_id === tenantId);
-      if (!split || split.status !== 'paid') return false;
-      return effectiveFrom <= b.billing_period_end && b.billing_period_start <= rangeEnd;
+  // A rate is blocked from edit/delete only when it has actually been used
+  // to compute a paid bill split — checked precisely via rate_breakdown[].rateId
+  // on the split itself, not by date-range overlap with any paid bill.
+  // This is the tighter guard from Round B: the old date-range check blocked
+  // same-day corrections even when the rate had never been used by any bill,
+  // because a different rate's paid bill happened to overlap the same date range.
+  const rateHasBeenUsedInPaidSplit = (rateId, tenantId) => {
+    return billSplits.some((s) => {
+      if (s.tenant_id !== tenantId || s.status !== 'paid') return false;
+      const breakdown = s.rate_breakdown;
+      if (!Array.isArray(breakdown)) return false;
+      return breakdown.some((seg) => seg.rateId === rateId);
     });
+  };
+
+  const rentRateEditGuard = (tenantId, rateId) => {
+    return rateHasBeenUsedInPaidSplit(rateId, tenantId);
   };
 
   const addRentRate = async (tenantId, { amountCents, frequency, effectiveFrom }) => {
@@ -632,12 +676,36 @@ export const PropertyProvider = ({ children }) => {
 
     const tenantRates = rentRates.filter((r) => r.tenant_id === tenantId);
 
+    // Same-day rate correction (Round B): when the open rate starts on the
+    // exact same day as the requested effectiveFrom, and that rate has never
+    // been used by any bill split, overwrite it in place (amount + frequency
+    // only) rather than inserting a new row. This is the fix for the
+    // "dead-end" bug: previously a same-day correction would either collide
+    // with itself (overlap error) or be blocked by the blunt date-range guard.
+    const openRate = tenantRates.find((r) => !r.effective_to);
+    if (openRate && openRate.effective_from === effectiveFrom) {
+      if (rateHasBeenUsedInPaidSplit(openRate.id, tenantId)) {
+        throw new Error(
+          'This rate has already been used in a paid bill and cannot be changed. Add a new rate starting from a later date instead.'
+        );
+      }
+      // Safe to overwrite in place — same start date, never billed.
+      const { data: updatedRate, error: updateError } = await supabase
+        .from('rent_rates')
+        .update({ amount_cents: amountCents, frequency })
+        .eq('id', openRate.id)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+      setRentRates((prev) => prev.map((r) => (r.id === openRate.id ? updatedRate : r)));
+      return updatedRate;
+    }
+
     // Auto-close the previous open-ended rate the day before this one
     // starts, so consecutive rates never have a gap between them. This
     // rate is expected to "overlap" the new one before it's closed, so
     // it's excluded from the overlap check below rather than treated as
     // a conflict.
-    const openRate = tenantRates.find((r) => !r.effective_to);
     const willAutoClose = openRate && openRate.effective_from < effectiveFrom;
     const ratesForOverlapCheck = willAutoClose
       ? tenantRates.filter((r) => r.id !== openRate.id)
@@ -686,7 +754,7 @@ export const PropertyProvider = ({ children }) => {
   const deleteRentRate = async (rateId) => {
     const rate = rentRates.find((r) => r.id === rateId);
     if (!rate) throw new Error('Rate not found');
-    if (rentRateEditGuard(rate.tenant_id, rate.effective_from, rate.effective_to)) {
+    if (rentRateEditGuard(rate.tenant_id, rateId)) {
       throw new Error(
         'This rate was used for an already-paid rent bill and cannot be deleted. End-date it with a new rate instead.'
       );

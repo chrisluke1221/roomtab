@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import Properties from './pages/Properties';
 import PropertyDetail from './pages/PropertyDetail';
+import TenantDetail from './pages/TenantDetail';
 import Login from './pages/Login';
 import Pricing from './pages/Pricing';
 import Privacy from './pages/Privacy';
@@ -68,6 +69,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <PropertyDetail />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/properties/:propertyId/tenants/:tenantId"
+        element={
+          <RequireAuth>
+            <TenantDetail />
           </RequireAuth>
         }
       />

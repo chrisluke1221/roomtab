@@ -152,6 +152,7 @@ const Dashboard = () => {
       existing.cents += cents;
     } else {
       balanceByTenant.set(key, {
+        tenantId: split.tenant_id,
         tenantName: split.tenant_name,
         propertyId: bill.property_id,
         propertyName: propertyById(bill.property_id)?.name,
@@ -289,7 +290,7 @@ const Dashboard = () => {
             {tenantBalances.slice(0, 10).map((row) => (
               <Link
                 key={`${row.propertyId}-${row.tenantName}`}
-                to={`/properties/${row.propertyId}`}
+                to={`/properties/${row.propertyId}/tenants/${row.tenantId}`}
                 className="flex items-center justify-between px-6 py-3 hover:bg-secondary-50 transition-colors duration-150"
               >
                 <p className="font-medium text-secondary-900">
@@ -350,7 +351,7 @@ const Dashboard = () => {
               >
                 <div>
                   <Link
-                    to={`/properties/${bill.property_id}`}
+                    to={`/properties/${bill.property_id}/tenants/${split.tenant_id}`}
                     className="font-medium text-secondary-900 hover:text-primary-600"
                   >
                     {property?.name || 'Property'} &middot; {split.tenant_name}

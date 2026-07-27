@@ -1,4 +1,4 @@
-import { computeSplits } from './billSplit';
+import { computeSplits, computeFlatSplitByHeadcount, usesFlatSplit, FLAT_SPLIT_BILL_TYPES } from './billSplit';
 
 const tenant = (overrides) => ({
   id: Math.random().toString(36).slice(2),
@@ -9,6 +9,8 @@ const tenant = (overrides) => ({
   move_out_date: null,
   ...overrides,
 });
+
+// ─── computeSplits (occupancy-day weighted) ───────────────────────────────────
 
 describe('computeSplits', () => {
   test('splits always sum exactly to the bill total, across randomized inputs', () => {
@@ -75,5 +77,124 @@ describe('computeSplits', () => {
     const couple = splits.find((s) => s.tenant_name === 'Couple');
     expect(couple.owed_amount).toBeGreaterThan(solo.owed_amount);
     expect(Math.round((solo.owed_amount + couple.owed_amount) * 100)).toBe(9000);
+  });
+});
+
+// ─── computeFlatSplitByHeadcount (internet bills) ────────────────────────────
+
+describe('computeFlatSplitByHeadcount', () => {
+  test('splits always sum exactly to the bill total, across randomized inputs', () => {
+    for (let i = 0; i < 200; i++) {
+      const tenantCount = 1 + Math.floor(Math.random() * 5);
+      const tenants = Array.from({ length: tenantCount }, () =>
+        tenant({
+          number_of_occupants: 1 + Math.floor(Math.random() * 3),
+          // Some tenants move in mid-period — flat split ignores this for share calc
+          move_in_date: `2026-01-${String(1 + Math.floor(Math.random() * 20)).padStart(2, '0')}`,
+        })
+      );
+      const totalAmount = Math.round((1 + Math.random() * 999) * 100) / 100;
+
+      const splits = computeFlatSplitByHeadcount(tenants, '2026-01-01', '2026-01-31', totalAmount);
+      const sum = splits.reduce((s, x) => s + Math.round(x.owed_amount * 100), 0);
+
+      expect(sum).toBe(Math.round(totalAmount * 100));
+    }
+  });
+
+  test('$90 over 3 equal single-occupant tenants = $30 each, regardless of move-in dates', () => {
+    const tenants = [
+      tenant({ name: 'A', move_in_date: '2026-01-01' }),
+      tenant({ name: 'B', move_in_date: '2026-01-15' }), // moved in mid-period
+      tenant({ name: 'C', move_in_date: '2026-01-28' }), // moved in near end
+    ];
+    const splits = computeFlatSplitByHeadcount(tenants, '2026-01-01', '2026-01-31', 90);
+    expect(splits).toHaveLength(3);
+    splits.forEach((s) => expect(s.owed_amount).toBe(30));
+    expect(splits.reduce((sum, s) => sum + Math.round(s.owed_amount * 100), 0)).toBe(9000);
+  });
+
+  test('tenant who moved out before the period started is excluded', () => {
+    const tenants = [
+      tenant({ name: 'In period' }),
+      tenant({ name: 'Gone', move_in_date: '2025-01-01', move_out_date: '2025-12-31' }),
+    ];
+    const splits = computeFlatSplitByHeadcount(tenants, '2026-01-01', '2026-01-31', 100);
+    expect(splits).toHaveLength(1);
+    expect(splits[0].tenant_name).toBe('In period');
+  });
+
+  test('tenant who moved in after the period ended is excluded', () => {
+    const tenants = [
+      tenant({ name: 'In period' }),
+      tenant({ name: 'Not yet', move_in_date: '2026-02-01' }),
+    ];
+    const splits = computeFlatSplitByHeadcount(tenants, '2026-01-01', '2026-01-31', 100);
+    expect(splits).toHaveLength(1);
+    expect(splits[0].tenant_name).toBe('In period');
+  });
+
+  test('room with 2 occupants pays twice as much as a room with 1 occupant', () => {
+    const tenants = [
+      tenant({ name: 'Solo', number_of_occupants: 1 }),
+      tenant({ name: 'Couple', number_of_occupants: 2 }),
+    ];
+    const splits = computeFlatSplitByHeadcount(tenants, '2026-01-01', '2026-01-31', 90);
+    const solo = splits.find((s) => s.tenant_name === 'Solo');
+    const couple = splits.find((s) => s.tenant_name === 'Couple');
+    expect(couple.owed_amount).toBe(solo.owed_amount * 2);
+    expect(Math.round((solo.owed_amount + couple.owed_amount) * 100)).toBe(9000);
+  });
+
+  test('single tenant gets 100% and the full amount', () => {
+    const splits = computeFlatSplitByHeadcount([tenant()], '2026-01-01', '2026-01-31', 120);
+    expect(splits).toHaveLength(1);
+    expect(splits[0].percentage).toBe(100);
+    expect(splits[0].owed_amount).toBe(120);
+  });
+
+  test('no tenants returns empty array without crashing', () => {
+    const splits = computeFlatSplitByHeadcount([], '2026-01-01', '2026-01-31', 100);
+    expect(splits).toEqual([]);
+  });
+
+  test('tenant who moved out on the last day of the period is included (boundary)', () => {
+    const tenants = [
+      tenant({ name: 'Full month' }),
+      tenant({ name: 'Moves out last day', move_out_date: '2026-01-31' }),
+    ];
+    const splits = computeFlatSplitByHeadcount(tenants, '2026-01-01', '2026-01-31', 100);
+    expect(splits).toHaveLength(2);
+  });
+
+  test('$100 over 3 equal tenants sums to exactly $100 (the classic 33.33 x3 failure)', () => {
+    const tenants = [tenant({ name: 'A' }), tenant({ name: 'B' }), tenant({ name: 'C' })];
+    const splits = computeFlatSplitByHeadcount(tenants, '2026-01-01', '2026-01-31', 100);
+    const sum = splits.reduce((s, x) => s + Math.round(x.owed_amount * 100), 0);
+    expect(sum).toBe(10000);
+  });
+
+  test('occupancy_start and occupancy_end equal the full billing period (flat split, no proration)', () => {
+    const splits = computeFlatSplitByHeadcount([tenant({ move_in_date: '2026-01-15' })], '2026-01-01', '2026-01-31', 100);
+    expect(splits[0].occupancy_start).toBe('2026-01-01');
+    expect(splits[0].occupancy_end).toBe('2026-01-31');
+  });
+});
+
+// ─── usesFlatSplit / FLAT_SPLIT_BILL_TYPES ────────────────────────────────────
+
+describe('usesFlatSplit', () => {
+  test('returns true for internet', () => {
+    expect(usesFlatSplit('internet')).toBe(true);
+  });
+
+  test('returns false for electricity, gas, water, other', () => {
+    ['electricity', 'gas', 'water', 'other'].forEach((type) => {
+      expect(usesFlatSplit(type)).toBe(false);
+    });
+  });
+
+  test('FLAT_SPLIT_BILL_TYPES contains internet', () => {
+    expect(FLAT_SPLIT_BILL_TYPES.has('internet')).toBe(true);
   });
 });

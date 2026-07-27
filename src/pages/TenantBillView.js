@@ -177,7 +177,93 @@ const TenantBillView = () => {
                 <Money dollars={split.owed_amount} className="text-primary-700 whitespace-nowrap" />
               </div>
             </div>
+          ) : split.bill_type === 'internet' ? (
+            // Round C: flat per-person explanation for internet bills
+            <div className="divide-y divide-secondary-100 text-sm">
+              {otherTenantCount > 0 && (
+                <div className="flex items-start justify-between px-4 py-3">
+                  <div className="flex items-start space-x-2">
+                    <Users className="w-4 h-4 text-secondary-400 mt-0.5" />
+                    <div>
+                      <p className="text-secondary-900 font-medium">
+                        Sharing this bill with {otherTenantCount} other tenant{otherTenantCount === 1 ? '' : 's'}
+                      </p>
+                      <p className="text-secondary-500">
+                        Internet is a fixed monthly service — the cost is shared equally by the number of
+                        people in the house, regardless of when anyone moved in or out during the period.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-start justify-between px-4 py-3">
+                <div className="flex items-start space-x-2">
+                  <Users className="w-4 h-4 text-secondary-400 mt-0.5" />
+                  <div>
+                    <p className="text-secondary-900 font-medium">Occupants in your room</p>
+                    <p className="text-secondary-500">Room: {split.room}</p>
+                  </div>
+                </div>
+                <span className="font-medium text-secondary-900 whitespace-nowrap tabular-nums">{split.number_of_occupants}</span>
+              </div>
+
+              {Array.isArray(split.peer_splits) && split.peer_splits.length > 1 && (
+                <div className="px-4 py-3">
+                  <p className="text-xs font-semibold text-secondary-600 uppercase tracking-wide mb-2">
+                    Everyone's share
+                  </p>
+                  <div className="space-y-1.5">
+                    {split.peer_splits.map((peer) => {
+                      const isYou = peer.id === split.id;
+                      return (
+                        <div key={peer.id} className="flex items-center justify-between text-sm">
+                          <span className={isYou ? 'font-semibold text-secondary-900' : 'text-secondary-700'}>
+                            {isYou ? 'You' : peer.tenant_name}
+                          </span>
+                          <span className="text-secondary-500">
+                            {peer.number_of_occupants} person{peer.number_of_occupants === 1 ? '' : 's'}
+                          </span>
+                          <span className="font-medium text-secondary-900 tabular-nums">{peer.percentage}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="px-4 py-3 bg-secondary-50">
+                <div className="flex items-center justify-between">
+                  <span className="text-secondary-700">
+                    Your share = {split.number_of_occupants} person{split.number_of_occupants === 1 ? '' : 's'} &divide; {totalPersonDays} total
+                  </span>
+                  <span className="font-semibold text-secondary-900 whitespace-nowrap tabular-nums">{split.percentage}%</span>
+                </div>
+                <p className="text-secondary-400 text-xs mt-0.5">
+                  {totalPersonDays} = total number of people in the house this period
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between px-4 py-3">
+                <span className="text-secondary-700">
+                  Your amount = {split.percentage}% &times; <Money dollars={split.total_amount} />
+                </span>
+                <Money
+                  dollars={Number(split.owed_amount) - carriedOver}
+                  className="text-primary-700 whitespace-nowrap"
+                />
+              </div>
+              {carriedOver > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 bg-secondary-50">
+                  <span className="text-secondary-700">
+                    Carried over from your {carryForwardSourceLabel || 'earlier bill'}
+                  </span>
+                  <Money dollars={carriedOver} className="text-primary-700 whitespace-nowrap" />
+                </div>
+              )}
+            </div>
           ) : (
+            // Default: occupancy-day-weighted explanation
             <div className="divide-y divide-secondary-100 text-sm">
               {otherTenantCount > 0 && (
                 <div className="flex items-start justify-between px-4 py-3">
