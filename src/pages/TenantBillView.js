@@ -91,6 +91,23 @@ const TenantBillView = () => {
   const totalPersonDays = split.bill_total_person_days;
   const otherTenantCount = split.bill_tenant_count - 1;
 
+  // Round 2: carry-forward breakdown — an unresolved remainder from an
+  // earlier unpaid bill rolled into this one's total, shown explicitly
+  // rather than folded silently into one opaque number.
+  const carriedOver = Number(split.carried_over_amount || 0);
+  const amountPaid = Number(split.amount_paid || 0);
+  const carryForwardSourceLabel = (() => {
+    const sources = split.carry_forward_sources;
+    if (!Array.isArray(sources) || sources.length === 0) return null;
+    if (sources.length > 1) return `${sources.length} earlier bills`;
+    const [source] = sources;
+    const month = new Date(`${source.billing_period_start}T00:00:00Z`).toLocaleString('en-AU', {
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    return `${source.bill_type} bill (${month})`;
+  })();
+
   return (
     <TenantShell propertyName={split.property_name} landlordName={split.landlord_name}>
       {noindexHelmet}
@@ -105,15 +122,31 @@ const TenantBillView = () => {
         <p className="text-secondary-500 text-sm mb-6">Hi {split.tenant_name}, here's exactly how your share was calculated.</p>
 
         {/* Headline amount */}
-        <div className="bg-primary-50 border border-primary-100 rounded-lg p-4 mb-6 flex items-center justify-between">
-          <div>
-            <p className="text-sm text-secondary-600">You owe</p>
-            <Money dollars={split.owed_amount} as="p" className="text-3xl text-primary-700" />
+        <div className="bg-primary-50 border border-primary-100 rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-secondary-600">You owe</p>
+              <Money dollars={split.owed_amount} as="p" className="text-3xl text-primary-700" />
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-secondary-600">of total bill</p>
+              <Money dollars={split.total_amount} as="p" className="text-lg text-secondary-900" />
+            </div>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-secondary-600">of total bill</p>
-            <Money dollars={split.total_amount} as="p" className="text-lg text-secondary-900" />
-          </div>
+          {carriedOver > 0 && (
+            <p className="text-sm text-secondary-700 mt-3 pt-3 border-t border-primary-100">
+              <Money dollars={Number(split.owed_amount) - carriedOver} className="font-semibold text-secondary-900" />{' '}
+              this bill + <Money dollars={carriedOver} className="font-semibold text-secondary-900" /> carried over
+              {carryForwardSourceLabel && <> from your {carryForwardSourceLabel}</>}
+            </p>
+          )}
+          {amountPaid > 0 && split.status !== 'paid' && (
+            <p className={`text-sm text-secondary-700 ${carriedOver > 0 ? 'mt-1' : 'mt-3 pt-3 border-t border-primary-100'}`}>
+              You've paid <Money dollars={amountPaid} className="font-semibold text-secondary-900" /> so far —{' '}
+              <Money dollars={Number(split.owed_amount) - amountPaid} className="font-semibold text-secondary-900" /> still
+              owing
+            </p>
+          )}
         </div>
 
         {/* Step-by-step calculation */}
@@ -234,8 +267,19 @@ const TenantBillView = () => {
                 <span className="text-secondary-700">
                   Your amount = {split.percentage}% &times; <Money dollars={split.total_amount} />
                 </span>
-                <Money dollars={split.owed_amount} className="text-primary-700 whitespace-nowrap" />
+                <Money
+                  dollars={Number(split.owed_amount) - carriedOver}
+                  className="text-primary-700 whitespace-nowrap"
+                />
               </div>
+              {carriedOver > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 bg-secondary-50">
+                  <span className="text-secondary-700">
+                    Carried over from your {carryForwardSourceLabel || 'earlier bill'}
+                  </span>
+                  <Money dollars={carriedOver} className="text-primary-700 whitespace-nowrap" />
+                </div>
+              )}
             </div>
           )}
         </div>

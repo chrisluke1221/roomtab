@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AlertCircle, CalendarClock, Inbox, Wallet, Bell } from 'lucide-react';
 import { useProperties } from '../contexts/PropertyContext';
-import { effectiveStatus } from '../lib/paymentStatus';
+import { effectiveStatus, isOutstanding } from '../lib/paymentStatus';
 import { todayLocal } from '../lib/dates';
 import Money from '../components/Money';
+import OwedBreakdown from '../components/OwedBreakdown';
 import StatusBadge from '../components/StatusBadge';
 import SplitActions from '../components/SplitActions';
 import NameSetupBanner from '../components/NameSetupBanner';
@@ -26,6 +27,7 @@ const Dashboard = () => {
     setNotifyRent,
     loadSampleProperty,
     setBillSplitStatus,
+    recordPartialPayment,
     sendBillEmail,
     revokeSplitToken,
     loading,
@@ -104,7 +106,7 @@ const Dashboard = () => {
 
   const propertyById = (propertyId) => properties.find((p) => p.id === propertyId);
 
-  const outstandingSplits = billSplits.filter((s) => s.status !== 'paid');
+  const outstandingSplits = billSplits.filter(isOutstanding);
   const today = todayLocal();
 
   const billById = new Map(bills.map((b) => [b.id, b]));
@@ -358,13 +360,17 @@ const Dashboard = () => {
                   </p>
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-3">
-                  <Money dollars={split.owed_amount} className="text-secondary-900" />
+                  <div className="text-right">
+                    <Money dollars={split.owed_amount} className="text-secondary-900" />
+                    <OwedBreakdown split={split} />
+                  </div>
                   <StatusBadge status={effectiveStatus(split, bill)} />
                   <SplitActions
                     split={split}
                     sendingSplitId={sendingSplitId}
                     onRevoke={handleRevokeLink}
                     onSetStatus={setBillSplitStatus}
+                    onRecordPayment={recordPartialPayment}
                     onSendEmail={handleSendEmail}
                   />
                 </div>

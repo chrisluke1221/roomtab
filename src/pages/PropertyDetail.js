@@ -21,10 +21,11 @@ import {
 } from 'lucide-react';
 import { useProperties } from '../contexts/PropertyContext';
 import Money from '../components/Money';
+import OwedBreakdown from '../components/OwedBreakdown';
 import StatusBadge from '../components/StatusBadge';
 import SplitActions from '../components/SplitActions';
 import ConfirmModal from '../components/ConfirmModal';
-import { effectiveStatus } from '../lib/paymentStatus';
+import { effectiveStatus, isOutstanding } from '../lib/paymentStatus';
 import { todayLocal } from '../lib/dates';
 
 const emptyTenant = {
@@ -99,6 +100,7 @@ const PropertyDetail = () => {
     reissueBill,
     deleteBill,
     setBillSplitStatus,
+    recordPartialPayment,
     sendBillEmail,
     revokeSplitToken,
     uploadBillAttachment,
@@ -203,7 +205,7 @@ const PropertyDetail = () => {
   // tenant across both rent and utility bills, not just the one in front of you.
   const balanceFor = (tenantId) =>
     billSplits
-      .filter((s) => s.tenant_id === tenantId && s.status !== 'paid')
+      .filter((s) => s.tenant_id === tenantId && isOutstanding(s))
       .reduce((sum, s) => sum + Math.round(Number(s.owed_amount) * 100), 0);
 
   // Most recent split for this tenant — the "show them the math" moment,
@@ -887,6 +889,7 @@ const PropertyDetail = () => {
                   <td className="py-1 tabular-nums">{split.percentage}%</td>
                   <td className="py-1 text-right">
                     <Money dollars={split.owed_amount} className="text-secondary-900" />
+                    <OwedBreakdown split={split} />
                   </td>
                   <td className="py-1 text-center">
                     <StatusBadge status={effectiveStatus(split, bill)} />
@@ -898,6 +901,7 @@ const PropertyDetail = () => {
                         sendingSplitId={sendingSplitId}
                         onRevoke={handleRevokeLink}
                         onSetStatus={setBillSplitStatus}
+                        onRecordPayment={recordPartialPayment}
                         onSendEmail={handleSendEmail}
                         billHasAttachment={!!bill.attachment_path}
                       />
@@ -940,6 +944,7 @@ const PropertyDetail = () => {
                 </div>
                 <div className="text-right">
                   <Money dollars={split.owed_amount} as="p" className="text-secondary-900 block mb-1" />
+                  <OwedBreakdown split={split} />
                   <StatusBadge status={effectiveStatus(split, bill)} />
                 </div>
               </div>
@@ -973,6 +978,7 @@ const PropertyDetail = () => {
                   sendingSplitId={sendingSplitId}
                   onRevoke={handleRevokeLink}
                   onSetStatus={setBillSplitStatus}
+                  onRecordPayment={recordPartialPayment}
                   onSendEmail={handleSendEmail}
                   billHasAttachment={!!bill.attachment_path}
                 />

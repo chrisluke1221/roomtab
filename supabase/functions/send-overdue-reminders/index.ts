@@ -50,6 +50,10 @@ Deno.serve(async (req) => {
       .from('bill_splits')
       .select('*, bills!inner(bill_type, total_amount, billing_period_start, billing_period_end, due_date), tenants(email)')
       .neq('status', 'paid')
+      // Round 2: a split whose remainder has already been carried forward
+      // into a later bill is resolved, not overdue — the tenant already got
+      // (or will get) a reminder for the new bill that now carries this amount.
+      .is('carried_forward_into_split_id', null)
       .lt('bills.due_date', today)
       .or(`last_reminder_at.is.null,last_reminder_at.lt.${reminderCutoff}`);
 
