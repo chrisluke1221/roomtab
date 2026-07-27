@@ -119,10 +119,12 @@ const Dashboard = () => {
     0
   );
   const overdueCount = outstandingWithBill.filter(({ bill }) => bill.due_date && bill.due_date < today).length;
-  const nextDueDate = outstandingWithBill
-    .map(({ bill }) => bill.due_date)
-    .filter((d) => d && d >= today)
-    .sort()[0];
+  // Keep the row alongside the date so the "Next due" tile can link
+  // straight to that tenant instead of being a dead-end static figure.
+  const nextDueRow = outstandingWithBill
+    .filter(({ bill }) => bill.due_date && bill.due_date >= today)
+    .sort((a, b) => a.bill.due_date.localeCompare(b.bill.due_date))[0];
+  const nextDueDate = nextDueRow?.bill.due_date;
 
   const filteredWithBill = outstandingWithBill.filter(({ bill }) => {
     if (filterPropertyId !== 'all' && bill.property_id !== filterPropertyId) return false;
@@ -152,6 +154,7 @@ const Dashboard = () => {
       existing.cents += cents;
     } else {
       balanceByTenant.set(key, {
+        tenantId: split.tenant_id,
         tenantName: split.tenant_name,
         propertyId: bill.property_id,
         propertyName: propertyById(bill.property_id)?.name,
@@ -277,7 +280,16 @@ const Dashboard = () => {
           </div>
           <div>
             <p className="text-xs text-secondary-500 uppercase tracking-wide">Next due</p>
-            <p className="text-xl font-semibold text-secondary-900">{nextDueDate || '—'}</p>
+            {nextDueRow ? (
+              <Link
+                to={`/properties/${nextDueRow.bill.property_id}/tenants/${nextDueRow.split.tenant_id}`}
+                className="text-xl font-semibold text-secondary-900 hover:text-primary-600"
+              >
+                {nextDueDate}
+              </Link>
+            ) : (
+              <p className="text-xl font-semibold text-secondary-900">—</p>
+            )}
           </div>
         </div>
       </div>
@@ -289,7 +301,7 @@ const Dashboard = () => {
             {tenantBalances.slice(0, 10).map((row) => (
               <Link
                 key={`${row.propertyId}-${row.tenantName}`}
-                to={`/properties/${row.propertyId}`}
+                to={`/properties/${row.propertyId}/tenants/${row.tenantId}`}
                 className="flex items-center justify-between px-6 py-3 hover:bg-secondary-50 transition-colors duration-150"
               >
                 <p className="font-medium text-secondary-900">
@@ -350,7 +362,7 @@ const Dashboard = () => {
               >
                 <div>
                   <Link
-                    to={`/properties/${bill.property_id}`}
+                    to={`/properties/${bill.property_id}/tenants/${split.tenant_id}`}
                     className="font-medium text-secondary-900 hover:text-primary-600"
                   >
                     {property?.name || 'Property'} &middot; {split.tenant_name}

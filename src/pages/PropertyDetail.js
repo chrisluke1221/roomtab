@@ -319,6 +319,8 @@ const PropertyDetail = () => {
   const [rentBillSubmitting, setRentBillSubmitting] = useState(false);
   const [rentBillYearFilter, setRentBillYearFilter] = useState('all');
   const [showOlderRentBills, setShowOlderRentBills] = useState(false);
+  // Round D: collapse older utility bills the same way Rent does
+  const [showOlderUtilityBills, setShowOlderUtilityBills] = useState(false);
 
   const [showPropertyForm, setShowPropertyForm] = useState(false);
   const [propertyForm, setPropertyForm] = useState({ name: '', address: '', description: '' });
@@ -698,19 +700,36 @@ const PropertyDetail = () => {
     const splits = billSplits.filter((s) => s.bill_id === bill.id);
     const hasPaidSplit = splits.some((s) => s.status === 'paid');
     const isUtility = bill.bill_type !== 'rent';
+    // Round D: show which split strategy was used so landlords can see at a
+    // glance why internet bills are split differently from electricity/gas.
+    const splitMethodBadge = isUtility && bill.bill_type === 'internet'
+      ? { label: 'Flat per person', title: 'Internet is a fixed-cost service — shared equally by headcount, not prorated by occupancy days' }
+      : isUtility
+      ? { label: 'By occupancy days', title: 'Split proportionally to how many days each tenant occupied the property during this period' }
+      : null;
 
     return (
       <div key={bill.id} className="card">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="font-semibold text-secondary-900 capitalize">
-              {bill.bill_type} &mdash; <Money dollars={bill.total_amount} />
-            </p>
+        <div className="flex items-start justify-between mb-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center flex-wrap gap-2 mb-0.5">
+              <p className="font-semibold text-secondary-900 capitalize">
+                {bill.bill_type} &mdash; <Money dollars={bill.total_amount} />
+              </p>
+              {splitMethodBadge && (
+                <span
+                  title={splitMethodBadge.title}
+                  className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-secondary-100 text-secondary-600 cursor-default"
+                >
+                  {splitMethodBadge.label}
+                </span>
+              )}
+            </div>
             {/* CHR-24: show description for Other utility bills */}
             {bill.bill_type === 'other' && bill.description && (
               <p className="text-xs text-secondary-500 mt-0.5">{bill.description}</p>
             )}
-            <p className="text-sm font-semibold text-secondary-900 mt-0.5">
+            <p className="text-sm text-secondary-600 mt-0.5">
               {bill.billing_period_start} to {bill.billing_period_end}
             </p>
             {editingDueDateBillId === bill.id ? (
@@ -765,7 +784,7 @@ const PropertyDetail = () => {
               </p>
             )}
           </div>
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 mt-0.5 flex-shrink-0">
             {isUtility && (
               <button
                 onClick={() => handleEditBill(bill)}
@@ -1008,6 +1027,15 @@ const PropertyDetail = () => {
   const shouldCollapse = rentBillYearFilter === 'all' && !showOlderRentBills;
   const visibleRentBills = shouldCollapse ? sortedRentBills.slice(0, 2) : sortedRentBills;
   const hiddenRentBillsCount = shouldCollapse ? Math.max(0, sortedRentBills.length - 2) : 0;
+
+  // Round D: same collapse pattern for utility bills — most recent 3 visible
+  // by default, older ones behind a toggle so the tab doesn't become a wall.
+  const sortedUtilityBills = [...utilityBills].sort((a, b) =>
+    b.billing_period_start.localeCompare(a.billing_period_start)
+  );
+  const shouldCollapseUtility = !showOlderUtilityBills;
+  const visibleUtilityBills = shouldCollapseUtility ? sortedUtilityBills.slice(0, 3) : sortedUtilityBills;
+  const hiddenUtilityBillsCount = shouldCollapseUtility ? Math.max(0, sortedUtilityBills.length - 3) : 0;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -1263,14 +1291,20 @@ const PropertyDetail = () => {
                     <p className="text-sm text-secondary-700">
                       Owes across everything: <Money cents={balanceCents} className={balanceCents > 0 ? 'text-secondary-900' : 'text-success-700'} />
                     </p>
+                    <Link
+                      to={`/properties/${propertyId}/tenants/${tenant.id}`}
+                      className="inline-flex items-center text-xs font-medium text-primary-600 hover:text-primary-700 mt-1"
+                    >
+                      View full breakdown &rarr;
+                    </Link>
                     {latestSplit && (
                       <a
                         href={`/bill/${latestSplit.access_token}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center text-xs font-medium text-primary-600 hover:text-primary-700 mt-1"
+                        className="inline-flex items-center text-xs font-medium text-secondary-500 hover:text-secondary-700 mt-1"
                       >
-                        Preview their breakdown &rarr;
+                        Preview tenant view &rarr;
                       </a>
                     )}
                   </div>
@@ -1439,6 +1473,37 @@ const PropertyDetail = () => {
           </div>
         )}
 
+        {/* Round B.4 — rent revenue total for the visible filter window */}
+        {(() => {
+          const filteredSplits = billSplits.filter(
+            (s) => yearFilteredRentBills.some((b) => b.id === s.bill_id)
+          );
+          const totalCents = filteredSplits.reduce((sum, s) => sum + Math.round(Number(s.owed_amount) * 100), 0);
+          const paidCents = filteredSplits
+            .filter((s) => s.status === 'paid')
+            .reduce((sum, s) => sum + Math.round(Number(s.owed_amount) * 100), 0);
+          const outstandingCents = filteredSplits
+            .filter((s) => isOutstanding(s))
+            .reduce((sum, s) => sum + Math.round(Number(s.owed_amount) * 100), 0);
+          if (totalCents === 0) return null;
+          return (
+            <div className="flex items-center space-x-6 mb-4 text-sm">
+              <div>
+                <p className="text-xs text-secondary-500 uppercase tracking-wide">Total billed</p>
+                <Money cents={totalCents} className="text-secondary-900" />
+              </div>
+              <div>
+                <p className="text-xs text-secondary-500 uppercase tracking-wide">Collected</p>
+                <Money cents={paidCents} className="text-success-700" />
+              </div>
+              <div>
+                <p className="text-xs text-secondary-500 uppercase tracking-wide">Outstanding</p>
+                <Money cents={outstandingCents} className={outstandingCents > 0 ? 'text-secondary-900' : 'text-success-700'} />
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-sm font-semibold text-secondary-500 uppercase tracking-wide">Rent bills</h3>
           <div className="flex items-center space-x-2">
@@ -1465,9 +1530,9 @@ const PropertyDetail = () => {
           </div>
         </div>
         <p className="text-xs text-secondary-500 mb-4">
-          Every month, a rent bill is created automatically using each tenant's active rate. If someone
-          moves out or their rate changes mid-month, it's prorated automatically. Use the button above only
-          to create a bill for an earlier period, or one that doesn't line up with a calendar month.
+          Each tenant pays their own agreed rate — rent isn't split from a shared total. If someone
+          moves out or their rate changes mid-month, their charge is prorated by day automatically.
+          Use the button above to generate a bill for an earlier period or a non-calendar window.
         </p>
 
         {showRentBillForm && (
@@ -1663,7 +1728,17 @@ const PropertyDetail = () => {
             <p className="text-secondary-600">No bills yet. Add one above once tenants are in place.</p>
           </div>
         ) : (
-          <div className="space-y-4">{utilityBills.map(renderBillSplits)}</div>
+          <>
+            <div className="space-y-3">{visibleUtilityBills.map(renderBillSplits)}</div>
+            {hiddenUtilityBillsCount > 0 && (
+              <button
+                onClick={() => setShowOlderUtilityBills(true)}
+                className="mt-4 text-sm text-primary-600 hover:text-primary-700 font-medium"
+              >
+                Show older bills ({hiddenUtilityBillsCount})
+              </button>
+            )}
+          </>
         )}
       </section>
       )}
