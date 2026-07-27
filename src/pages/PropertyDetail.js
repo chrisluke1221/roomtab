@@ -1293,11 +1293,11 @@ const PropertyDetail = () => {
                     </p>
                     <Link
                       to={`/properties/${propertyId}/tenants/${tenant.id}`}
-                      className="inline-flex items-center text-xs font-medium text-primary-600 hover:text-primary-700 mt-1 block"
+                      className="inline-flex items-center text-xs font-medium text-primary-600 hover:text-primary-700 mt-1"
                     >
                       View full breakdown &rarr;
                     </Link>
-                  {latestSplit && (
+                    {latestSplit && (
                       <a
                         href={`/bill/${latestSplit.access_token}`}
                         target="_blank"
