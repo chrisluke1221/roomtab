@@ -81,6 +81,11 @@ create policy "Operators can read their own audit log"
 -- 3. Helper: assert_operator() — called at the top of every operator RPC
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Never created anywhere else in this repo's migration history — the
+-- private schema is not exposed to any client role, only used internally by
+-- SECURITY DEFINER functions in the public schema.
+create schema if not exists private;
+
 create or replace function private.assert_operator()
 returns void
 language plpgsql security definer set search_path = '' as $$
@@ -450,16 +455,20 @@ begin
   where created_at >= now() - interval '30 days'
     and status != 'draft';
 
-  -- Split-sum violations: bills where sum(bill_splits.amount_cents) != bills.total_cents
-  -- This MUST always be zero — it's a hard alert.
+  -- Split-sum violations: bills where sum(bill_splits.owed_amount) != bills.total_amount.
+  -- Carry-forward (Round 2) deliberately adds an earlier unpaid remainder on
+  -- top of a split's own owed_amount without changing the bill's own
+  -- total_amount — so carried_over_amount must be subtracted back out before
+  -- comparing, or every bill that ever absorbed a carry-forward would
+  -- false-positive here. This MUST always be zero — it's a hard alert.
   select count(*) into v_split_violations
   from public.bills b
   where b.status != 'draft'
     and (
-      select coalesce(sum(bs.amount_cents), 0)
+      select coalesce(sum(bs.owed_amount - coalesce(bs.carried_over_amount, 0)), 0)
       from public.bill_splits bs
       where bs.bill_id = b.id
-    ) != b.total_cents;
+    ) != b.total_amount;
 
   -- Tenant link open rate (viewed / sent, last 30d)
   select
@@ -539,7 +548,7 @@ declare
 begin
   perform private.assert_operator();
 
-  select id, landlord_id, total_cents, status, bill_type, description
+  select id, landlord_id, total_amount, status, bill_type, description
     into v_bill from public.bills where id = p_bill_id;
 
   if not found then
@@ -564,7 +573,7 @@ begin
   return jsonb_build_object(
     'bill', jsonb_build_object(
       'id', v_bill.id, 'landlord_id', v_bill.landlord_id,
-      'total_cents', v_bill.total_cents, 'status', v_bill.status,
+      'total_amount', v_bill.total_amount, 'status', v_bill.status,
       'bill_type', v_bill.bill_type, 'description', v_bill.description
     ),
     'events', coalesce(v_events, '[]'::jsonb)
@@ -615,7 +624,9 @@ create or replace function public.operator_regenerate_tenant_token(p_split_id uu
 returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
-  v_new_token text;
+  -- Real column is access_token (uuid), not token (text) — mirrors the
+  -- existing revoke_bill_split_token RPC's exact generation pattern.
+  v_new_token uuid := gen_random_uuid();
   v_landlord  uuid;
 begin
   perform private.assert_operator();
@@ -629,11 +640,9 @@ begin
     raise exception 'split not found' using errcode = 'P0006';
   end if;
 
-  v_new_token := encode(gen_random_bytes(24), 'base64url');
-
   update public.bill_splits
-    set token      = v_new_token,
-        expires_at = now() + interval '30 days'
+    set access_token = v_new_token,
+        expires_at   = now() + interval '30 days'
   where id = p_split_id;
 
   insert into public.operator_audit_log (operator_id, action, target_account, target_object, metadata)
