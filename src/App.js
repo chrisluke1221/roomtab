@@ -15,6 +15,8 @@ import Terms from './pages/Terms';
 import TenantBillView from './pages/TenantBillView';
 import DemoBill from './pages/DemoBill';
 import UpgradeModal from './components/UpgradeModal';
+import OperatorDashboard from './pages/operator/OperatorDashboard';
+import OperatorAccountDetail from './pages/operator/OperatorAccountDetail';
 import { PropertyProvider } from './contexts/PropertyContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 
@@ -22,6 +24,25 @@ const RequireAuth = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   if (loading) return null;
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return (
+    <>
+      <Helmet defer={false}>
+        <meta name="robots" content="noindex" />
+      </Helmet>
+      {children}
+    </>
+  );
+};
+
+// Operator-only guard: must be authenticated AND have app_metadata.operator=true.
+// Non-operators who navigate to /operator/* are bounced to /dashboard, not /login,
+// so they don't accidentally expose the operator route's existence to a logged-out
+// user who stumbles on the URL.
+const RequireOperator = ({ children }) => {
+  const { isAuthenticated, isOperator, loading } = useAuth();
+  if (loading) return null;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (!isOperator) return <Navigate to="/dashboard" replace />;
   return (
     <>
       <Helmet defer={false}>
@@ -78,6 +99,23 @@ function AppRoutes() {
           <RequireAuth>
             <TenantDetail />
           </RequireAuth>
+        }
+      />
+      {/* Operator plane — only accessible with app_metadata.operator=true */}
+      <Route
+        path="/operator"
+        element={
+          <RequireOperator>
+            <OperatorDashboard />
+          </RequireOperator>
+        }
+      />
+      <Route
+        path="/operator/accounts/:accountId"
+        element={
+          <RequireOperator>
+            <OperatorAccountDetail />
+          </RequireOperator>
         }
       />
     </Routes>

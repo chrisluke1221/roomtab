@@ -456,6 +456,14 @@ export const PropertyProvider = ({ children }) => {
 
     setBills((prev) => [bill, ...prev]);
     setBillSplits((prev) => [...prev, ...insertedSplits]);
+    // Audit: bill created (utility / water / electricity / internet / other)
+    await writeBillEvent(bill.id, 'issued', {
+      bill_type: billType,
+      total_amount: totalAmount,
+      period_start: periodStart,
+      period_end: periodEnd,
+      split_count: insertedSplits.length,
+    });
     return { bill, splits: insertedSplits };
   };
 
@@ -582,6 +590,8 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (error) throw error;
     setBills((prev) => prev.map((b) => (b.id === billId ? data : b)));
+    // Audit: bill reissued after roster change
+    await writeBillEvent(billId, 'reissued', { triggered_by: 'landlord_manual' });
     return data;
   };
 
@@ -841,6 +851,14 @@ export const PropertyProvider = ({ children }) => {
 
     setBills((prev) => [bill, ...prev]);
     setBillSplits((prev) => [...prev, ...insertedSplits]);
+    // Audit: rent bill issued
+    await writeBillEvent(bill.id, 'issued', {
+      bill_type: 'rent',
+      total_cents: totalCents,
+      period_start: periodStart,
+      period_end: periodEnd,
+      split_count: insertedSplits.length,
+    });
     return { bill, splits: insertedSplits };
   };
 
@@ -1016,6 +1034,23 @@ export const PropertyProvider = ({ children }) => {
     return property;
   };
 
+  // ─── bill_events helpers ────────────────────────────────────────────────
+  // Fire-and-forget: we never block the primary action on an audit write
+  // failure — a missing event row is always preferable to a broken UI.
+  const writeBillEvent = async (billId, eventType, payload = {}) => {
+    try {
+      await supabase.from('bill_events').insert({
+        bill_id: billId,
+        event_type: eventType,
+        actor_type: 'landlord',
+        actor_id: user?.id ?? null,
+        payload,
+      });
+    } catch (err) {
+      console.warn('[bill_events] failed to write event:', eventType, err);
+    }
+  };
+
   const deleteBill = async (billId) => {
     const bill = bills.find((b) => b.id === billId);
     if (bill?.attachment_path) {
@@ -1045,6 +1080,16 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (error) throw error;
     setBillSplits((prev) => prev.map((s) => (s.id === splitId ? data : s)));
+    // Audit: landlord manually confirmed payment or undid it
+    const split = data;
+    if (split?.bill_id) {
+      const eventType = status === 'paid' ? 'confirmed' : 'issued'; // 'issued' = reset to pending
+      await writeBillEvent(split.bill_id, eventType, {
+        split_id: splitId,
+        tenant_id: split.tenant_id,
+        action: status === 'paid' ? 'landlord_mark_paid' : 'landlord_undo_paid',
+      });
+    }
     return data;
   };
 
@@ -1055,7 +1100,8 @@ export const PropertyProvider = ({ children }) => {
   const recordPartialPayment = async (splitId, amountPaid) => {
     const split = billSplits.find((s) => s.id === splitId);
     const updates = { amount_paid: amountPaid };
-    if (amountPaid >= Number(split?.owed_amount || 0)) {
+    const isFullPayment = amountPaid >= Number(split?.owed_amount || 0);
+    if (isFullPayment) {
       updates.status = 'paid';
       updates.paid_at = new Date().toISOString();
     }
@@ -1067,6 +1113,19 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (error) throw error;
     setBillSplits((prev) => prev.map((s) => (s.id === splitId ? data : s)));
+    // Audit: partial or full payment recorded by landlord
+    if (data?.bill_id) {
+      await writeBillEvent(data.bill_id,
+        isFullPayment ? 'confirmed' : 'partial_payment_recorded',
+        {
+          split_id: splitId,
+          tenant_id: data.tenant_id,
+          amount_paid: amountPaid,
+          owed_amount: split?.owed_amount,
+          is_full_payment: isFullPayment,
+        }
+      );
+    }
     return data;
   };
 
@@ -1094,6 +1153,14 @@ export const PropertyProvider = ({ children }) => {
         .single();
       if (!lockError) setBills((prev) => prev.map((b) => (b.id === bill.id ? lockedBill : b)));
     }
+    // Audit: bill link sent to tenant
+    if (bill?.id) {
+      await writeBillEvent(bill.id, 'sent', {
+        split_id: splitId,
+        tenant_id: split?.tenant_id,
+        tenant_email: split?.tenant_name,
+      });
+    }
     return data;
   };
 
@@ -1103,6 +1170,14 @@ export const PropertyProvider = ({ children }) => {
     const { data: newToken, error } = await supabase.rpc('revoke_bill_split_token', { p_split_id: splitId });
     if (error) throw error;
     setBillSplits((prev) => prev.map((s) => (s.id === splitId ? { ...s, access_token: newToken } : s)));
+    // Audit: tenant token rotated by landlord
+    const split = billSplits.find((s) => s.id === splitId);
+    if (split?.bill_id) {
+      await writeBillEvent(split.bill_id, 'token_revoked', {
+        split_id: splitId,
+        tenant_id: split.tenant_id,
+      });
+    }
     return newToken;
   };
 
