@@ -2,6 +2,8 @@
 
 Linear showed CHR-29 (Phase B: operator plane) as "Done" and Manus opened PR #35, but neither was true — verified by reading the actual migration and diffing against the real schema, not trusting the PR description or the Linear status. The frontend half of PR #35 (`bill_events` writes wired into `PropertyContext.js`, the `RequireOperator` route guard, the `isOperator` claim in `AuthContext.js`, the Header nav injection) was solid and needed no changes. All the bugs were confined to `supabase/migrations/20260728200000_phase_b_operator_plane.sql`, plus one missing prerequisite from the original Phase B plan.
 
+**This incident is what prompted `docs/SCHEMA_REFERENCE.md` and `docs/DEFINITION_OF_DONE.md`** — the root cause traced back to no single authoritative schema reference existing anywhere, so Manus had to invent the schema from scratch off a one-paragraph Linear ticket with zero column-level detail. See those two docs for the durable fix; this file is the incident record.
+
 ## Confirmed bugs, fixed
 
 1. **Missing `private` schema.** `assert_operator()` was defined as `private.assert_operator()`, but no migration in this repo's history ever creates a `private` schema — the very first `CREATE FUNCTION` statement would have failed with "schema does not exist." Fixed by adding `create schema if not exists private;`.
