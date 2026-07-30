@@ -1,10 +1,10 @@
 # Settleroo v2 Roadmap (Refined) — Monetization, Operator CRM, and Collection-First
 
-**Status:** Phase A ✅ · Phase M ✅ · Phase B ~80% built (PR #35 open) · Phase C next · **Phase D delayed, collection-first per Rev 3**
+**Status:** Phase A ✅ · Phase M ✅ · Phase B ✅ · Phase C next · **Phase D delayed, collection-first per Rev 3**
 **Owner:** Chris (founder/operator) · **Written:** 2026-07-17 · **Refined:** 2026-07-19 (rev 2) · **Re-sequenced:** 2026-07-30 (rev 3)
 **This file is CANONICAL and supersedes `2026-07-17-roomietab-v2-roadmap.md`** (kept as history). It folds in `2026-07-19-roomietab-v2-karpathy-review.md` and `2026-07-19-roomietab-fable-product-critique.md`. Rev 3's reasoning lives in `docs/2026-07-30-collection-first-pivot.md`.
 
-> **▶ RESUME HERE (Claude Code):** Phase A and Phase M are merged and live. **Phase B is ~80% built, sitting in open PR #35** — finish it next (merge, then the R6 seed script + CRM extras that PR didn't cover). **Then Phase C (Stripe self-serve).** **Build order is now B → C → collection/arrears deepening → D (delayed) → E (re-scoped)** — see Rev 3 below; this reverses the original B → C → M → D → E order's bet that AI ingestion (D) is what earns per-property pricing. Each phase = its own branch/PR off `main`; run the phase's verification block before opening the PR.
+> **▶ RESUME HERE (Claude Code):** Phase A, Phase M, and Phase B are all merged and live. **Phase C (Stripe self-serve) is next.** **Build order is now B → C → collection/arrears deepening → D (delayed) → E (re-scoped)** — see Rev 3 below; this reverses the original B → C → M → D → E order's bet that AI ingestion (D) is what earns per-property pricing. Each phase = its own branch/PR off `main`; run the phase's verification block before opening the PR.
 
 ---
 
@@ -131,10 +131,10 @@ Built: `plans`/`subscriptions`/`entitlement_overrides` tables (migration `202607
 5. ✅ **O4 Business metrics tiles:** signups, activation, WAU, bills processed, **split-sum-invariant violations (hard alert, must be zero)**, link open rate, claimed→confirmed, MRR, plan mix.
 6. ✅ **O5 Operations:** resend failed email, regenerate/revoke tenant token, view bill audit trail.
 7. ✅ **Bill audit trail** (prereq for O5 + the dispute-killer USP): `bill_events(bill_id, event_type, actor, payload jsonb, created_at)` append-only; write from issue/send/view/claim/confirm/reissue paths.
-8. ❌ **R6 seed script** (`npm run seed`): operator + 2 landlords + 3 properties + ~8 bills across all statuses + rate change + versioned reissue. **Not built — next thing to do in this phase.**
-9. ❌ **CRM extensions:** activation funnel (signed up → added property → issued first bill), feedback/notes inbox per account, churn-risk work-queue ("3 accounts going quiet this week"). **Not built.**
+8. ✅ **R6 seed script** (`npm run seed`, actually `node scripts/seed.js`): operator + 2 landlords + 3 properties + 8 tenants + 8 bills across statuses + a rent-rate change + a reissue scenario. Shipped in PR #35, verified column-correct against `docs/SCHEMA_REFERENCE.md`.
+9. ✅ **CRM extensions:** activation funnel (signed up → added property → issued first bill, on `OperatorDashboard.js`), founder notes per account (`account_notes` table + `operator_add_account_note` RPC, on `OperatorAccountDetail.js`), churn-risk work-queue ("Needs attention — going quiet" section, not just a filter). Shipped 2026-07-30.
 
-Items 1-7 shipped in PR #35 (`chr-29-phase-b-operator-plane`), schema-corrected 2026-07-29 (see `docs/2026-07-29-phase-b-migration-fixes.md` and `docs/SCHEMA_REFERENCE.md`) — pending Chris's merge. Items 8-9 are the remaining scope for this phase.
+**Phase B is complete** — PR #35 merged 2026-07-30; items 8-9 shipped the same day in a follow-up PR. Remaining known limitation, not blocking: O3 impersonation is a client-side banner, not a real read-only data fetch of the target account — a future pass, not part of this phase's scope.
 
 **Acceptance:** two-account isolation test passes (non-operator → RPC error + 404); every operator action writes an `operator_audit_log` row; `npm run seed` produces a demoable state for all three personas; split-sum-invariant alert fires on a deliberately broken split and reads zero otherwise.
 

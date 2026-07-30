@@ -159,6 +159,12 @@ Append-only, no UPDATE/DELETE. `id`, `bill_id` (→ `bills`), `event_type`
 (nullable → `auth.users`), `target_object` (nullable text, e.g. `'bill:uuid'`),
 `metadata` (jsonb), `created_at`.
 
+## `public.account_notes` (Phase B CRM extras)
+`id`, `account_id` (→ `auth.users`, the landlord account the note is about),
+`operator_id` (→ `auth.users`, who wrote it), `note` (text), `created_at`.
+Written via `operator_add_account_note(p_account_id, p_note)`; read via
+`operator_get_account_detail`'s `notes` array.
+
 ## Access model notes
 - The operator claim lives in `auth.users.raw_app_meta_data->'operator'`
   (boolean), settable only via the service role — never through app code.
