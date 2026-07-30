@@ -160,6 +160,71 @@ export default function OperatorDashboard() {
         </section>
       )}
 
+      {/* Activation funnel (roadmap item 9: signed up -> added property -> issued first bill) */}
+      {accounts.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-secondary-500 uppercase tracking-wide mb-3">
+            Activation funnel
+          </h2>
+          <div className="grid grid-cols-3 gap-4">
+            <MetricTile label="Signed up" value={accounts.length} />
+            <MetricTile
+              label="Added a property"
+              value={accounts.filter((a) => a.has_property).length}
+              sub={`${Math.round((accounts.filter((a) => a.has_property).length / accounts.length) * 100)}% of signups`}
+            />
+            <MetricTile
+              label="Issued first bill"
+              value={accounts.filter((a) => a.has_issued_bill).length}
+              sub={`${Math.round((accounts.filter((a) => a.has_issued_bill).length / accounts.length) * 100)}% of signups`}
+            />
+          </div>
+        </section>
+      )}
+
+      {/* Needs attention — churn-risk work-queue, not just a filter */}
+      {accounts.some((a) => a.churn_risk) && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-secondary-500 uppercase tracking-wide">
+              Needs attention — going quiet
+            </h2>
+            <button
+              onClick={() => setChurnOnly(true)}
+              className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+            >
+              Filter accounts list below →
+            </button>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl divide-y divide-amber-100">
+            {accounts
+              .filter((a) => a.churn_risk)
+              .slice(0, 5)
+              .map((a) => (
+                <div key={a.id} className="flex items-center justify-between px-4 py-3">
+                  <div>
+                    <span className="font-medium text-secondary-900">{a.full_name || a.email}</span>
+                    <span className="ml-2 text-xs text-secondary-500">
+                      No login for {a.last_sign_in_at ? relativeDate(a.last_sign_in_at) : 'ever'}
+                    </span>
+                  </div>
+                  <Link
+                    to={`/operator/accounts/${a.id}`}
+                    className="text-primary-600 hover:text-primary-700 font-medium text-xs"
+                  >
+                    View →
+                  </Link>
+                </div>
+              ))}
+            {accounts.filter((a) => a.churn_risk).length > 5 && (
+              <div className="px-4 py-2 text-xs text-secondary-500">
+                +{accounts.filter((a) => a.churn_risk).length - 5} more — filter the list below to see all
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* O1 — Accounts list */}
       <section>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">

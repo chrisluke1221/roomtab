@@ -103,6 +103,11 @@ export default function OperatorAccountDetail() {
   // Operations feedback
   const [opMsg, setOpMsg] = useState(null);
 
+  // Founder notes
+  const [newNote, setNewNote] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -196,6 +201,27 @@ export default function OperatorAccountDetail() {
       setOpMsg({ type: 'error', text: err.message });
     } finally {
       setRevoking(false);
+    }
+  };
+
+  // Founder notes
+  const handleAddNote = async (e) => {
+    e.preventDefault();
+    if (!newNote.trim()) return;
+    setNoteSaving(true);
+    setNoteError(null);
+    try {
+      const { error: rpcError } = await supabase.rpc('operator_add_account_note', {
+        p_account_id: accountId,
+        p_note: newNote.trim(),
+      });
+      if (rpcError) throw rpcError;
+      setNewNote('');
+      await load();
+    } catch (err) {
+      setNoteError(err.message || 'Failed to save note');
+    } finally {
+      setNoteSaving(false);
     }
   };
 
@@ -455,6 +481,42 @@ export default function OperatorAccountDetail() {
             </div>
           </div>
         )}
+
+        {/* Founder notes (roadmap item 9) */}
+        <div className="bg-white border border-secondary-200 rounded-2xl p-6 space-y-4">
+          <h2 className="font-semibold text-secondary-900">Founder notes</h2>
+          <form onSubmit={handleAddNote} className="flex gap-2">
+            <input
+              type="text"
+              value={newNote}
+              onChange={(e) => setNewNote(e.target.value)}
+              placeholder="Add a note about this account…"
+              className="flex-1 text-sm border border-secondary-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-300"
+            />
+            <button
+              type="submit"
+              disabled={noteSaving || !newNote.trim()}
+              className="text-sm px-4 py-2 rounded-lg font-medium bg-primary-600 text-white hover:bg-primary-700 transition-colors disabled:opacity-50"
+            >
+              {noteSaving ? 'Saving…' : 'Add'}
+            </button>
+          </form>
+          {noteError && <p className="text-xs text-red-600">{noteError}</p>}
+          {account?.notes?.length > 0 ? (
+            <div className="divide-y divide-secondary-100">
+              {account.notes.map((n) => (
+                <div key={n.id} className="py-3 text-sm">
+                  <p className="text-secondary-800">{n.note}</p>
+                  <p className="text-xs text-secondary-400 mt-1">
+                    {n.operator_email} · {relativeDate(n.created_at)}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-secondary-400">No notes yet.</p>
+          )}
+        </div>
 
         {/* Recent bill events — O5 audit trail */}
         {account?.recent_bill_events?.length > 0 && (
