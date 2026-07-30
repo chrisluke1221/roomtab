@@ -8,7 +8,34 @@ Chris is running low on Claude Code weekly usage and wants Manus.ai to keep deve
 
 1. Read `CLAUDE.md` (repo root) — product context, the hard guardrails, and working conventions. It is the entry point for every session on this repo, human or AI.
 2. Skim the `docs/` folder, newest file first (sorted by the `YYYY-MM-DD-` prefix) — that's the real, current project history and the decisions behind it. This handoff doc is not a substitute for that history.
-3. Then come back here for the rules specific to working alongside Claude Code.
+3. Read `docs/DEFINITION_OF_DONE.md` — the actual gate before anything is called done, drawn from real mistakes made on this repo. A ticket isn't finished until every line of it is true, not once tests pass and the description sounds right.
+4. Then come back here for the rules specific to working alongside Claude Code.
+
+## Before writing any SQL (added 2026-07-30, after a real incident)
+
+`docs/SCHEMA_REFERENCE.md` is the single source of truth for the real,
+currently-applied schema — every table's actual column names/types and every
+RPC's real signature. **Check it before writing any SQL that references an
+existing table.** If a table or column isn't documented there yet, grep
+`supabase/migrations/*.sql` for its real definition — never assume or
+pattern-match a column name from naming convention or memory. A prior PR
+invented `bills.total_cents`, `bill_splits.amount_cents`, and
+`bill_splits.token` — none of which exist (the real columns are
+`total_amount`, `owed_amount`, and `access_token`) — because nothing forced a
+check against the real schema before writing the SQL. Update
+`docs/SCHEMA_REFERENCE.md` in the same PR as any migration that changes a
+table's shape.
+
+**Every new migration file must be named with a `PROPOSED_` prefix** — this
+was previously only implied ("write the .sql file, don't apply it"), now
+it's explicit. No exceptions.
+
+**If a ticket is schema-heavy or architecturally open-ended and only has a
+short Linear description** (no file/column-level detail attached): stop
+before full implementation and post a short technical design as a Linear
+comment or PR draft first, flagged for review. Don't invent hundreds of
+lines of schema from one paragraph of scope — that's exactly how the
+incident above happened.
 
 ## Source of truth for what to work on: Linear
 
