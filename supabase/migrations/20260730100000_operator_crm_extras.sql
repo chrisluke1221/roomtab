@@ -21,7 +21,7 @@ alter table public.account_notes enable row level security;
 
 create policy "Operators can read account notes"
   on public.account_notes for select
-  using ((select (raw_app_meta_data -> 'operator')::boolean from auth.users where id = auth.uid()) is true);
+  using ((select (raw_app_meta_data ->> 'operator')::boolean from auth.users where id = auth.uid()) is true);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- operator_add_account_note(p_account_id, p_note) — O2, audited
@@ -106,7 +106,7 @@ begin
   from auth.users u
   left join public.subscriptions s on s.account_id = u.id and s.status in ('active', 'trialing')
   left join public.plans p on p.id = s.plan_id
-  where (u.raw_app_meta_data -> 'operator') is not true;  -- exclude operator accounts
+  where (u.raw_app_meta_data ->> 'operator')::boolean is not true;  -- exclude operator accounts
 
   return coalesce(v_result, '[]'::jsonb);
 end;
