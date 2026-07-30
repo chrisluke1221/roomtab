@@ -169,6 +169,34 @@ export const PropertyProvider = ({ children }) => {
     refresh();
   }, [refresh]);
 
+  // CHR-34 Phase C: fire-and-forget Stripe quantity sync after property add/remove.
+  // Only fires for active Stripe-managed subscriptions; no-ops silently for
+  // free/manual accounts. Never throws — billing sync failures must not block
+  // the landlord's core property management actions.
+  const syncSubscriptionQuantity = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+      const anonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+      // Fire-and-forget: we intentionally don't await or check the response.
+      // The edge function is idempotent and Stripe is the source of truth.
+      fetch(`${supabaseUrl}/functions/v1/sync-subscription-quantity`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: anonKey,
+        },
+        body: JSON.stringify({}),
+      }).catch(() => {
+        // Swallow network errors — this is best-effort billing sync
+      });
+    } catch {
+      // Never propagate — billing sync must not break property management
+    }
+  };
+
   const createProperty = async ({ name, address, description }) => {
     await requireEntitlement('max_properties');
     const { data, error } = await supabase
@@ -178,6 +206,8 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (error) throw error;
     setProperties((prev) => [data, ...prev]);
+    // Sync Stripe subscription quantity after adding a property
+    syncSubscriptionQuantity();
     return data;
   };
 
@@ -207,6 +237,8 @@ export const PropertyProvider = ({ children }) => {
     setProperties((prev) => prev.filter((p) => p.id !== propertyId));
     setTenants((prev) => prev.filter((t) => t.property_id !== propertyId));
     setBills((prev) => prev.filter((b) => b.property_id !== propertyId));
+    // Sync Stripe subscription quantity after removing a property
+    syncSubscriptionQuantity();
   };
 
   // Ground truth for "who's on this property right now" at a point in time,

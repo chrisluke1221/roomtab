@@ -1,25 +1,27 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
-import { Check, Minus } from 'lucide-react';
+import { Check, CheckCircle, Minus, Loader2, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 
 // Public pricing page. Renders from the plans table (RLS allows anon select
 // on is_public plans) rather than hardcoded copy, so repricing is a data
 // change — the operator edits the row, no deploy.
+//
+// CHR-34 Phase C: replaced the mailto: CTA with a real Stripe Checkout button.
+// The button calls the create-checkout-session edge function and redirects to
+// the Stripe-hosted checkout page. On return, ?checkout=success shows a
+// success banner. A "Manage billing" link calls create-portal-session for
+// accounts that already have a Stripe subscription.
 
 const TITLE = 'Pricing — Settleroo';
 
-// Display order + labels for the keys inside plans.limits. A numeric null
-// renders as Unlimited; booleans as included/not-included.
 const FEATURE_ROWS = [
   { key: 'max_properties', label: 'Properties' },
   { key: 'max_active_tenants', label: 'Active tenants' },
   { key: '_attachments', label: 'Bill attachments' },
   { key: 'branding_removable', label: 'Remove "Powered by Settleroo" from tenant pages' },
-  // The three AI features are still building — one honest combined row reads
-  // better than three "coming soon" rows selling futures on a pricing table.
   { key: '_ai_features', label: 'Early access to AI features as they ship' },
 ];
 
@@ -49,11 +51,42 @@ const FeatureValue = ({ value }) => {
   return <span className="text-secondary-900 font-medium">{value}</span>;
 };
 
+// Call an authenticated edge function and return the JSON response.
+// Throws if the session is missing or the function returns an error.
+const callEdgeFunction = async (fnName, body = {}) => {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+  const res = await fetch(`${supabaseUrl}/functions/v1/${fnName}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+      apikey: process.env.REACT_APP_SUPABASE_ANON_KEY,
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? `${fnName} failed`);
+  return json;
+};
+
 const Pricing = () => {
   const { isAuthenticated } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [plans, setPlans] = useState([]);
   const [period, setPeriod] = useState('monthly');
   const [loadError, setLoadError] = useState(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  // Whether this account already has a Stripe-managed subscription
+  const [hasStripeSubscription, setHasStripeSubscription] = useState(false);
+  const [isProPlan, setIsProPlan] = useState(false);
+
+  // ?checkout=success is set by the success_url in create-checkout-session
+  const checkoutSuccess = searchParams.get('checkout') === 'success';
 
   useEffect(() => {
     supabase
@@ -67,11 +100,64 @@ const Pricing = () => {
       });
   }, []);
 
+  // Load the caller's subscription state so we know whether to show
+  // "Upgrade" or "Manage billing"
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    supabase
+      .from('subscriptions')
+      .select('plan_id, source, status')
+      .single()
+      .then(({ data }) => {
+        if (!data) return;
+        setHasStripeSubscription(data.source === 'stripe' && data.status === 'active');
+        setIsProPlan(data.plan_id === 'pro' && data.status === 'active');
+      });
+  }, [isAuthenticated]);
+
+  // Clear ?checkout=success from the URL after showing the banner so a
+  // page refresh doesn't re-show it.
+  useEffect(() => {
+    if (checkoutSuccess) {
+      const timer = setTimeout(() => {
+        setSearchParams((prev) => {
+          prev.delete('checkout');
+          return prev;
+        });
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [checkoutSuccess, setSearchParams]);
+
   const yearlySavingPct = useMemo(() => {
     const paid = plans.find((p) => p.price_cents_monthly > 0);
     if (!paid || !paid.price_cents_yearly) return null;
     return Math.round((1 - paid.price_cents_yearly / (paid.price_cents_monthly * 12)) * 100);
   }, [plans]);
+
+  const handleUpgrade = async () => {
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    try {
+      const { url } = await callEdgeFunction('create-checkout-session', { period });
+      window.location.href = url;
+    } catch (err) {
+      setCheckoutError(err.message);
+      setCheckoutLoading(false);
+    }
+  };
+
+  const handleManageBilling = async () => {
+    setPortalLoading(true);
+    try {
+      const { url } = await callEdgeFunction('create-portal-session');
+      window.location.href = url;
+    } catch (err) {
+      // Portal errors are non-critical — show inline rather than a full error state
+      setCheckoutError(err.message);
+      setPortalLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen py-16">
@@ -81,6 +167,37 @@ const Pricing = () => {
       </Helmet>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        {/* ── Checkout success banner ─────────────────────────────────────── */}
+        {checkoutSuccess && (
+          <div className="mb-8 rounded-lg border border-success-200 bg-success-50 px-5 py-4 flex items-start gap-3">
+            <CheckCircle className="w-5 h-5 text-success-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-success-900">You're on Pro.</p>
+              <p className="text-sm text-success-700 mt-0.5">
+                Property limits removed, branding removed from tenant pages. Your subscription
+                is billed per property — adding or removing a property updates your bill
+                automatically.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Checkout error banner ───────────────────────────────────────── */}
+        {checkoutError && (
+          <div className="mb-8 rounded-lg border border-danger-200 bg-danger-50 px-5 py-4">
+            <p className="text-sm text-danger-700">
+              <span className="font-semibold">Couldn't start checkout: </span>{checkoutError}
+            </p>
+            <button
+              className="text-xs text-danger-600 underline mt-1"
+              onClick={() => setCheckoutError(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         <div className="text-center mb-10">
           <h1 className="text-4xl font-bold text-secondary-900 mb-4">
             Less than a week's rent from one room — for the whole year.
@@ -156,13 +273,47 @@ const Pricing = () => {
                 {isPaid ? (
                   isAuthenticated ? (
                     <>
-                      <a
-                        href="mailto:chrisluke1221@gmail.com?subject=Upgrade%20to%20Settleroo%20Pro"
-                        className="btn-primary w-full block text-center"
-                      >
-                        Email me — I'll set you up within 24h
-                      </a>
-                      <p className="text-xs text-secondary-500 text-center mt-2">Signed, Chris — no self-serve checkout yet.</p>
+                      {/* Already on Pro via Stripe — show Manage billing */}
+                      {isProPlan && hasStripeSubscription ? (
+                        <button
+                          onClick={handleManageBilling}
+                          disabled={portalLoading}
+                          className="btn-secondary w-full flex items-center justify-center gap-2"
+                        >
+                          {portalLoading ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <ExternalLink className="w-4 h-4" />
+                          )}
+                          Manage billing
+                        </button>
+                      ) : isProPlan ? (
+                        // Pro but managed manually (operator-granted) — no Stripe portal
+                        <div className="btn-secondary w-full text-center cursor-default opacity-70">
+                          Pro (operator-managed)
+                        </div>
+                      ) : (
+                        /* Free plan — show real Checkout button */
+                        <>
+                          <button
+                            onClick={handleUpgrade}
+                            disabled={checkoutLoading}
+                            className="btn-primary w-full flex items-center justify-center gap-2"
+                          >
+                            {checkoutLoading ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Redirecting to checkout…
+                              </>
+                            ) : (
+                              `Upgrade to ${plan.name}`
+                            )}
+                          </button>
+                          <p className="text-xs text-secondary-500 text-center mt-2">
+                            Secure checkout via Stripe. Cancel any time.
+                          </p>
+                        </>
+                      )}
                     </>
                   ) : (
                     <Link to="/login" className="btn-primary w-full block text-center">
