@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertCircle, CalendarClock, Inbox, Wallet, Bell } from 'lucide-react';
+import { AlertCircle, CalendarClock, CreditCard, ExternalLink, Inbox, Loader2, Wallet, Bell } from 'lucide-react';
+import { supabase } from '../lib/supabaseClient';
 import { useProperties } from '../contexts/PropertyContext';
 import { effectiveStatus, isOutstanding } from '../lib/paymentStatus';
 import { todayLocal } from '../lib/dates';
@@ -43,6 +44,50 @@ const Dashboard = () => {
   const [filterPropertyId, setFilterPropertyId] = useState('all');
   const [filterType, setFilterType] = useState('all');
   const navigate = useNavigate();
+
+  // CHR-34 Phase C: load subscription state to show 'Manage billing' for
+  // Stripe-managed Pro accounts. Loaded here (not in PropertyContext) because
+  // it's a dashboard-only concern and we don't want to add billing state to
+  // the global context.
+  const [stripeSubscription, setStripeSubscription] = useState(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from('subscriptions')
+      .select('plan_id, source, status')
+      .single()
+      .then(({ data }) => {
+        if (data?.source === 'stripe' && data?.status === 'active' && data?.plan_id === 'pro') {
+          setStripeSubscription(data);
+        }
+      });
+  }, []);
+
+  const handleManageBilling = async () => {
+    setPortalLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
+      const anonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+      const res = await fetch(`${supabaseUrl}/functions/v1/create-portal-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+          apikey: anonKey,
+        },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Portal error');
+      window.location.href = json.url;
+    } catch (err) {
+      setActionError(err.message || 'Could not open billing portal');
+      setPortalLoading(false);
+    }
+  };
 
   const handleToggleNotify = async () => {
     setSavingNotify(true);
@@ -252,6 +297,23 @@ const Dashboard = () => {
             <Bell className="w-4 h-4" />
             <span>Overdue reminders: {landlordSettings.notify_overdue ? 'On' : 'Off'}</span>
           </button>
+          {/* CHR-34 Phase C: Manage billing link for Stripe Pro accounts */}
+          {stripeSubscription && (
+            <button
+              onClick={handleManageBilling}
+              disabled={portalLoading}
+              className="flex items-center space-x-2 text-sm text-secondary-500 hover:text-secondary-900 disabled:opacity-50"
+              title="Manage your Pro subscription, invoices, and payment method"
+            >
+              {portalLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CreditCard className="w-4 h-4" />
+              )}
+              <span>Manage billing</span>
+              <ExternalLink className="w-3 h-3 opacity-50" />
+            </button>
+          )}
         </div>
       </div>
 

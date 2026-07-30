@@ -122,6 +122,8 @@ columns in the schema: `rent_rates.amount_cents`, `plans.price_cents_monthly`,
 | `price_cents_monthly` / `price_cents_yearly` | **integer** | real cents columns |
 | `price_unit` | text | `check ('flat','per_property')` |
 | `limits` | jsonb | e.g. `max_bills_per_month` (currently `null` = unlimited on all plans) |
+| `stripe_price_id_monthly` | text | nullable — Stripe Price ID for monthly billing. Null = plan not available via Checkout. Set by operator, never by app code. |
+| `stripe_price_id_yearly` | text | nullable — Stripe Price ID for yearly billing. |
 | (name, sort_order, is_public, etc.) | | see `20260719090000_plans_and_entitlements.sql` for the full original list |
 
 ## `public.subscriptions`
