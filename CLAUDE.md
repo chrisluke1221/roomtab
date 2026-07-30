@@ -40,6 +40,8 @@ The product's trust story is **"AI at the edges, deterministic math in the middl
 
 ## Working conventions
 
+- **`docs/DEFINITION_OF_DONE.md` is the actual gate before anything is called done** — applies to every agent on this repo, not just Manus. Read it before marking a ticket/PR complete.
+- **`docs/SCHEMA_REFERENCE.md` is the single source of truth for the real, currently-applied schema.** Check it before writing any SQL against an existing table — never assume or pattern-match a column name. Update it in the same PR as any migration that changes a table's shape.
 - **Each phase = its own branch/PR off `main`.** Don't bundle phases.
 - **Before opening a PR, run that phase's verification block** (in the roadmap) plus the guardrail tests, and:
   - `CI=true npx react-scripts test`
@@ -57,3 +59,5 @@ The product's trust story is **"AI at the edges, deterministic math in the middl
 - `supabase/migrations/` — SQL migrations. `supabase/functions/` — edge functions.
 - `docs/` — all specs, PRDs, reviews, handoffs.
 - **`docs/design-system.md`** — colors, typography, spacing, component primitives, and a design review checklist. Check any new UI against this before shipping.
+- **`docs/SCHEMA_REFERENCE.md`** — the real, currently-applied database schema. Check before writing SQL against an existing table.
+- **`docs/DEFINITION_OF_DONE.md`** — the checklist every agent is held to before calling a ticket/PR done.
