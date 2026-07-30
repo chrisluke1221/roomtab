@@ -11,6 +11,7 @@ import {
   X,
   DollarSign,
   ArrowRight,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -30,7 +31,7 @@ const loggedInNavItems = [
 ];
 
 const Header = () => {
-  const { user, logout, isAuthenticated } = useAuth();
+  const { user, logout, isAuthenticated, isOperator } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -40,7 +41,16 @@ const Header = () => {
     navigate('/');
   };
 
-  const navItems = isAuthenticated ? loggedInNavItems : loggedOutNavItems;
+  // Operator Console link is injected at runtime — it's not in the static
+  // loggedInNavItems array so it never appears in the bundle for non-operators.
+  const navItems = isAuthenticated
+    ? [
+        ...loggedInNavItems,
+        ...(isOperator
+          ? [{ name: 'Operator', to: '/operator', icon: ShieldCheck }]
+          : []),
+      ]
+    : loggedOutNavItems;
 
   const renderNavLink = (item, { mobile } = {}) => {
     const Icon = item.icon;

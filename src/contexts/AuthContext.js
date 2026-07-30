@@ -72,6 +72,13 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
+  // Operator flag: set exclusively via service-role in app_metadata (never
+  // user_metadata, which the user can write themselves). The claim is read
+  // from the JWT that Supabase Auth embeds in the session — no extra RPC
+  // needed. The SECURITY DEFINER RPCs re-assert this server-side; the
+  // client flag is only for routing and UI visibility.
+  const isOperator = !!(user?.app_metadata?.operator === true);
+
   const value = {
     user,
     signInWithGoogle,
@@ -80,6 +87,7 @@ export const AuthProvider = ({ children }) => {
     updateName,
     loading,
     isAuthenticated: !!user,
+    isOperator,
   };
 
   return (

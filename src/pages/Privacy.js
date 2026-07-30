@@ -2,7 +2,7 @@ import React from 'react';
 import { Helmet } from 'react-helmet-async';
 
 const TITLE = 'Privacy Policy — Settleroo';
-const LAST_UPDATED = '22 July 2026';
+const LAST_UPDATED = '30 July 2026';
 
 // Baseline, plain-language privacy policy — not a substitute for legal
 // advice, but real coverage rather than a placeholder. Its absence is a
@@ -47,6 +47,18 @@ const Privacy = () => (
             Every landlord account is isolated at the database level — your properties, tenants, and bills
             are never visible to another account, and no landlord can see another landlord's data. This
             isolation is enforced by the database itself, not just by application code.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-semibold text-secondary-900 mb-2">Support access to your account</h2>
+          <p>
+            A small operator team can access account data for support and troubleshooting purposes — for
+            example, to help diagnose a billing issue you report. This access is <strong>read-only</strong>:
+            an operator can never create, edit, or delete a bill, tenant, or payment on your behalf while
+            viewing your account this way. Every time an operator opens an account, that action is
+            permanently logged, including who did it, when, and which account — there is no way to view an
+            account without it being recorded.
           </p>
         </section>
 
