@@ -8,11 +8,21 @@
 -- adding an exception's dates/reason to that same object doesn't cross any
 -- new privacy boundary — it's the same shared-bill visibility model).
 --
--- Only the jsonb *content* of peer_splits changes; the function's RETURNS
--- TABLE column list is unchanged, so `create or replace` is sufficient here
--- (no DROP FUNCTION needed — that's only required when the column list
--- itself changes, per docs/SCHEMA_REFERENCE.md).
-create or replace function public.get_bill_split_by_token(p_token uuid)
+-- The live function's actual OUT-parameter row type didn't match what was
+-- expected from create-or-replace (Postgres error 42P13) — rather than
+-- guess why from local files, drop and recreate, per
+-- docs/SCHEMA_REFERENCE.md's standing note that this is required whenever
+-- Postgres won't accept an in-place alter.
+--
+-- That error is also the tell that PROPOSED_20260728100000_peer_splits_add_
+-- occupants.sql is actually live already (despite never being renamed to
+-- drop its PROPOSED_ prefix — a docs-sync gap, not a schema gap) — its
+-- peer_splits.number_of_occupants field is what TenantBillView.js's
+-- internet-bill flat-split display reads. Preserved below so this
+-- migration doesn't silently regress that.
+drop function if exists public.get_bill_split_by_token(uuid);
+
+create function public.get_bill_split_by_token(p_token uuid)
 returns table (
   id uuid,
   bill_id uuid,
@@ -76,6 +86,7 @@ language sql security definer set search_path = '' as $$
         jsonb_build_object(
           'id', s2.id,
           'tenant_name', s2.tenant_name,
+          'number_of_occupants', s2.number_of_occupants,
           'occupancy_days', s2.occupancy_days,
           'person_days', s2.person_days,
           'percentage', s2.percentage,
