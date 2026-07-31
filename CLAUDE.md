@@ -4,12 +4,13 @@ Settleroo is a React + Supabase web app for landlords who rent by the room: it s
 
 ## ▶ Where to resume (read in this order)
 
-1. **`docs/2026-07-19-settleroo-v2-roadmap.md`** — the CANONICAL roadmap/spec. Read this first. (It supersedes `2026-07-17-roomietab-v2-roadmap.md`, which is kept only as history.)
-2. `docs/2026-07-19-roomietab-v2-karpathy-review.md` — the spec-quality review the refined roadmap answers.
-3. `docs/2026-07-15-roomietab-v1.5-PRD.md` — prior build order (context).
-4. `docs/2026-07-19-roomietab-fable-product-critique.md` — product/pricing/positioning critique (informs the OPEN pricing question).
+1. **`docs/2026-07-30-session-handoff.md`** — read this FIRST if you're picking up a session mid-flight. Current state, next step, decisions made, and real landmines hit this session (a Postgres jsonb→boolean cast gotcha, a Stripe webhook subscribed to the wrong events, etc.) — don't re-derive any of this.
+2. **`docs/2026-07-19-settleroo-v2-roadmap.md`** — the CANONICAL roadmap/spec, currently Rev 3. (Supersedes `2026-07-17-roomietab-v2-roadmap.md`, kept only as history.)
+3. `docs/DEFINITION_OF_DONE.md` — the checklist every agent is held to before calling anything done.
+4. `docs/SCHEMA_REFERENCE.md` — the real, currently-applied schema. Check before writing any SQL.
+5. `docs/2026-07-19-roomietab-v2-karpathy-review.md`, `docs/2026-07-15-roomietab-v1.5-PRD.md`, `docs/2026-07-19-roomietab-fable-product-critique.md` — older context, read if needed.
 
-**Current state:** Phase A ✅ and Phase M ✅ are merged and live. Phase B (operator plane) is ~80% built, sitting in open PR #35 (`chr-29-phase-b-operator-plane`) pending Chris's merge — schema-corrected 2026-07-29, see `docs/2026-07-29-phase-b-migration-fixes.md`; still missing the `npm run seed` script and the CRM extras (activation funnel, feedback inbox, churn-risk queue). **Roadmap sequencing was formally revised 2026-07-30 (Rev 3, see `docs/2026-07-30-collection-first-pivot.md`): build order is now B → C → Collection → D (delayed) → E (re-scoped)** — the 4-agent research's collection-first finding is adopted, not just noted; AI ingestion (Phase D) is deprioritized, not cancelled. See `docs/2026-07-19-settleroo-v2-roadmap.md` (canonical, Rev 3) for the full phase-by-phase detail. **Per `docs/DEFINITION_OF_DONE.md`: check in with Chris after each phase before starting the next.** Phase C's implementation brief for Manus lives at `docs/2026-07-30-phase-c-manus-brief.md`.
+**Current state (2026-07-30):** Phase A ✅, Phase M ✅, Phase B ✅, **Phase C ✅ code-complete and deployed** — Stripe test-mode checkout wired up (product/prices, webhook, secrets all set), but **the actual end-to-end test hasn't been confirmed working yet as of this handoff** — see `docs/2026-07-30-session-handoff.md` for the exact next step. **Roadmap sequencing formally revised 2026-07-30 (Rev 3, see `docs/2026-07-30-collection-first-pivot.md`): build order is B → C → Collection → D (delayed) → E (re-scoped)** — AI ingestion (Phase D) is deprioritized, not cancelled. **Per `docs/DEFINITION_OF_DONE.md`: check in with Chris after each phase before starting the next.**
 
 **Locked decisions (rev 2, 2026-07-19):** pricing = **per-property (~A$10/door/mo)**, no bills/month cap; ICP = **2–10 property operators**; Phase D ingestion first pass is **human-reviewed only (no auto-send)** — auto-send + trust ladder are Phase E, gated on eval calibration.
 
