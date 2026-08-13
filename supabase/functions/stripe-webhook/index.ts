@@ -177,6 +177,13 @@ Deno.serve(async (req) => {
           { headers: { Authorization: `Bearer ${stripeSecretKey}` } },
         );
         const stripeSub = await subRes.json() as Record<string, unknown>;
+        if (!subRes.ok) {
+          // Don't silently fall through to a null period/current_period_end —
+          // log the real Stripe error body so a future failure here is
+          // diagnosable from function logs instead of showing up only as a
+          // quietly-null current_period_end in the DB.
+          console.error('checkout.session.completed: failed to fetch subscription from Stripe', stripeSub);
+        }
 
         const period = detectPeriod(stripeSub);
         const currentPeriodEnd = stripeSub.current_period_end
