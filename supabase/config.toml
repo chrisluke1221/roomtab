@@ -372,6 +372,22 @@ authorization_url_path = "/oauth/consent"
 # Allow dynamic client registration
 allow_dynamic_registration = false
 
+# Both functions below are called by external, unauthenticated callers
+# (Stripe's webhook delivery, pg_cron's scheduled HTTP call) — neither
+# carries a Supabase-issued JWT, so the platform's default verify_jwt=true
+# gate would reject every real call with 401 before the function's own
+# auth logic (Stripe signature verification / CRON_SECRET check) ever runs.
+# Found 2026-08-13: stripe-webhook was deployed without --no-verify-jwt and
+# had been silently rejecting every real Stripe webhook delivery since
+# Phase C shipped — see docs/2026-08-13-fix-stripe-webhook-jwt-gate.md.
+# Pinning both here so a future `supabase functions deploy` without the
+# CLI flag can't regress this again.
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.send-overdue-reminders]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.
