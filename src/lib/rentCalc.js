@@ -1,22 +1,36 @@
 // Effective-dated rent proration. A tenant can have multiple rent_rates
-// rows over time (weekly/fortnightly/monthly, each with an effective
-// date range). Given a billing period, this resolves the rate in force
-// for each day and sums the cost — so a mid-period rate change prorates
-// both rates by day, cents-exact.
+// rows over time, each with an effective date range. Given a billing
+// period, this resolves the rate in force for each day and sums the
+// cost — so a mid-period rate change prorates both rates by day,
+// cents-exact.
+//
+// 2026-08-13 (Chris): `rent_rates.amount_cents` is always the tenant's
+// WEEKLY rent, regardless of `frequency` — `frequency` is purely the
+// billing/reminder cadence the tenant is on, never a second unit the
+// stored amount could mean. Every other frequency's amount is derived
+// from the weekly figure via a fixed, calendar-agnostic formula, so a
+// given rate charges the same daily amount every day it's in force
+// (previously monthly rates charged a different daily amount depending
+// on which specific calendar month a bill fell in — replaced here).
 
 const DAY_MS = 86400000;
+const WEEK_DAYS = 7;
+const AVG_MONTH_DAYS = 365 / 12; // ~30.4167 — matches how a weekly-quoted
+// rent is conventionally converted to a monthly figure (daily rate times
+// the average days in a month across a non-leap year), not a flat "times 4"
+// or a specific-month day count.
 
-const daysInMonth = (year, monthIndex) => new Date(year, monthIndex + 1, 0).getDate();
+const dailyRateCents = (rate) => rate.amount_cents / WEEK_DAYS;
 
-// Daily rate in cents for a given calendar day. Weekly/fortnightly divide
-// by a fixed period length; monthly divides by the number of days in that
-// specific calendar month, so "$800/mo in a 31-day month" and "$800/mo in
-// a 30-day month" charge different daily amounts — matching how real
-// rent proration works, not a flat 30.44-day approximation.
-const dailyRateCents = (rate, date) => {
-  if (rate.frequency === 'weekly') return rate.amount_cents / 7;
-  if (rate.frequency === 'fortnightly') return rate.amount_cents / 14;
-  return rate.amount_cents / daysInMonth(date.getFullYear(), date.getMonth());
+// The amount a rate of `weeklyCents`/week works out to for a given billing
+// frequency — used anywhere a rate needs to be *displayed* or *charged* at
+// its own cadence (rate cards, reminder emails) rather than prorated
+// day-by-day. Monthly and fortnightly are always derived, never stored.
+export const amountForFrequency = (weeklyCents, frequency) => {
+  const daily = weeklyCents / WEEK_DAYS;
+  if (frequency === 'fortnightly') return Math.round(daily * 14);
+  if (frequency === 'monthly') return Math.round(daily * AVG_MONTH_DAYS);
+  return Math.round(weeklyCents); // weekly (or unrecognized — safest fallback)
 };
 
 const rateForDay = (rates, date) => {
@@ -45,7 +59,7 @@ export const computeRentForPeriod = (rates, periodStart, periodEnd) => {
       cursor = new Date(cursor.getTime() + DAY_MS);
       continue;
     }
-    const cents = dailyRateCents(rate, cursor);
+    const cents = dailyRateCents(rate);
     const last = segments[segments.length - 1];
     if (last && last.rateId === rate.id) {
       last.days += 1;
