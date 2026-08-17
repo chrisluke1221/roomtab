@@ -622,9 +622,7 @@ const TenantDetail = () => {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">
                 <div>
-                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">
-                    Rent per week (leave unchanged to keep the current rate)
-                  </label>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Rent per week</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400">$</span>
                     <input
@@ -636,9 +634,10 @@ const TenantDetail = () => {
                       onChange={(e) => setTenantEditForm((p) => ({ ...p, rentAmount: e.target.value }))}
                     />
                   </div>
+                  <p className="text-xs text-secondary-400 mt-1">Leave unchanged to keep the current rate.</p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Billed</label>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Billing frequency</label>
                   <select
                     className="input-field"
                     value={tenantEditForm.rentFrequency}
@@ -648,6 +647,7 @@ const TenantDetail = () => {
                     <option value="fortnightly">Fortnightly</option>
                     <option value="monthly">Monthly</option>
                   </select>
+                  <p className="text-xs text-secondary-400 mt-1">Amount for this cadence is calculated automatically.</p>
                 </div>
               </div>
               {tenantEditError && <p className="text-danger-600 text-sm">{tenantEditError}</p>}

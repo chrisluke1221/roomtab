@@ -1443,11 +1443,7 @@ const PropertyDetail = () => {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">
               <div>
-                <label className="block text-sm font-medium text-secondary-900 mb-1.5">
-                  {editingTenantId
-                    ? 'Rent per week (leave unchanged to keep the current rate)'
-                    : 'Rent per week (optional — can set later)'}
-                </label>
+                <label className="block text-sm font-medium text-secondary-900 mb-1.5">Rent per week</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400">$</span>
                   <input
@@ -1459,10 +1455,12 @@ const PropertyDetail = () => {
                     onChange={(e) => setTenantForm((p) => ({ ...p, rentAmount: e.target.value }))}
                   />
                 </div>
-                <p className="text-xs text-secondary-400 mt-1">Always the weekly rent, even if billed monthly or fortnightly below.</p>
+                <p className="text-xs text-secondary-400 mt-1">
+                  {editingTenantId ? 'Leave unchanged to keep the current rate.' : 'Optional — can set later.'}
+                </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-secondary-900 mb-1.5">Billed</label>
+                <label className="block text-sm font-medium text-secondary-900 mb-1.5">Billing frequency</label>
                 <select
                   className="input-field"
                   value={tenantForm.rentFrequency}
