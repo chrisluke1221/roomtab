@@ -119,6 +119,7 @@ const TenantDetail = () => {
       room: tenant.room,
       moveInDate: tenant.move_in_date,
       moveOutDate: tenant.move_out_date || '',
+      fixedTermEnd: tenant.fixed_term_end || '',
       numberOfOccupants: tenant.number_of_occupants,
       rentAmount: currentRate ? String(currentRate.amount_cents / 100) : '',
       rentFrequency: currentRate ? currentRate.frequency : 'weekly',
@@ -138,6 +139,7 @@ const TenantDetail = () => {
         room: tenantEditForm.room.trim(),
         move_in_date: tenantEditForm.moveInDate,
         move_out_date: tenantEditForm.moveOutDate || null,
+        fixed_term_end: tenantEditForm.fixedTermEnd || null,
         number_of_occupants: tenantEditForm.numberOfOccupants,
       });
       if (shouldCreateRate) {
@@ -585,6 +587,9 @@ const TenantDetail = () => {
               {tenant.move_out_date && (
                 <p>Move-out: <span className="text-secondary-900 font-medium">{tenant.move_out_date}</span></p>
               )}
+              {tenant.fixed_term_end && (
+                <p>Lease ends: <span className="text-secondary-900 font-medium">{tenant.fixed_term_end}</span></p>
+              )}
               {tenant.email && <p>Email: <span className="text-secondary-900">{tenant.email}</span></p>}
               {tenant.phone && <p>Phone: <span className="text-secondary-900">{tenant.phone}</span></p>}
             </div>
@@ -693,6 +698,18 @@ const TenantDetail = () => {
                     value={tenantEditForm.moveOutDate}
                     onChange={(e) => setTenantEditForm((p) => ({ ...p, moveOutDate: e.target.value }))}
                   />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Lease end date (optional)</label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={tenantEditForm.fixedTermEnd}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, fixedTermEnd: e.target.value }))}
+                  />
+                  <p className="text-xs text-secondary-400 mt-1">Separate from move-out — a lease can be extended.</p>
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">

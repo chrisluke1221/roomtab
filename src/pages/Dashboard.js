@@ -32,6 +32,7 @@ const Dashboard = () => {
     recordPartialPayment,
     sendBillEmail,
     revokeSplitToken,
+    updateTenant,
     loading,
     error,
     refresh,
@@ -203,6 +204,37 @@ const Dashboard = () => {
 
   const outstandingSplits = billSplits.filter(isOutstanding);
   const today = todayLocal();
+
+  // 2026-08-17: lease end dates within the next 4 weeks — the same window
+  // the landlord-reminder cron uses, surfaced here too so it's visible
+  // without waiting for an email. fixed_term_end is deliberately distinct
+  // from move_out_date: a lease can be extended (pushing this forward)
+  // without the tenant ever having actually given notice.
+  const FOUR_WEEKS_MS = 28 * 86400000;
+  const leasesEndingSoon = tenants
+    .filter((t) => t.status !== 'former' && t.fixed_term_end && t.fixed_term_end >= today)
+    .filter((t) => new Date(t.fixed_term_end) - new Date(today) <= FOUR_WEEKS_MS)
+    .map((t) => ({
+      tenant: t,
+      property: propertyById(t.property_id),
+      daysRemaining: Math.round((new Date(t.fixed_term_end) - new Date(today)) / 86400000),
+    }))
+    .sort((a, b) => a.tenant.fixed_term_end.localeCompare(b.tenant.fixed_term_end));
+
+  const handleConfirmMoveOut = async (tenant) => {
+    if (
+      !window.confirm(
+        `Confirm ${tenant.name} is moving out on ${tenant.fixed_term_end} and not extending their lease?`
+      )
+    )
+      return;
+    try {
+      await updateTenant(tenant.id, { move_out_date: tenant.fixed_term_end });
+    } catch (err) {
+      console.error('Failed to confirm move-out:', err);
+      setActionError(err.message || 'Failed to confirm move-out');
+    }
+  };
 
   const billById = new Map(bills.map((b) => [b.id, b]));
   const outstandingWithBill = outstandingSplits
@@ -481,6 +513,48 @@ const Dashboard = () => {
                 </Link>
               ))
             )}
+          </div>
+        </div>
+      )}
+
+      {leasesEndingSoon.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-sm font-semibold text-secondary-500 uppercase tracking-wide mb-3">
+            Leases ending soon ({leasesEndingSoon.length})
+          </h2>
+          <div className="card divide-y divide-secondary-100 p-0 overflow-hidden">
+            {leasesEndingSoon.map(({ tenant, property, daysRemaining }) => (
+              <div
+                key={tenant.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4"
+              >
+                <div>
+                  <Link
+                    to={`/properties/${tenant.property_id}/tenants/${tenant.id}`}
+                    className="font-medium text-secondary-900 hover:text-primary-600"
+                  >
+                    {property?.name || 'Property'} &middot; {tenant.name}
+                  </Link>
+                  <p className="text-sm text-secondary-500">
+                    Lease ends {tenant.fixed_term_end} &middot; {daysRemaining} day{daysRemaining === 1 ? '' : 's'} away
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleConfirmMoveOut(tenant)}
+                    className="text-sm text-danger-600 hover:text-danger-700 font-medium"
+                  >
+                    Confirm move-out
+                  </button>
+                  <Link
+                    to={`/properties/${tenant.property_id}/tenants/${tenant.id}`}
+                    className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    Extend
+                  </Link>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

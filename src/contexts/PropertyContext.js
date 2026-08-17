@@ -292,6 +292,7 @@ export const PropertyProvider = ({ children }) => {
     room,
     moveInDate,
     moveOutDate,
+    fixedTermEnd,
     numberOfOccupants,
     rentAmountCents,
     rentFrequency,
@@ -308,6 +309,7 @@ export const PropertyProvider = ({ children }) => {
         room,
         move_in_date: moveInDate,
         move_out_date: moveOutDate || null,
+        fixed_term_end: fixedTermEnd || null,
         number_of_occupants: numberOfOccupants || 1,
       })
       .select()
@@ -342,9 +344,16 @@ export const PropertyProvider = ({ children }) => {
   };
 
   const updateTenant = async (tenantId, updates) => {
+    // Changing the lease end date always clears any reminder already sent
+    // for the previous date — an extension gets its own fresh 4-weeks-out
+    // reminder, it doesn't inherit "already reminded" from the old date.
+    const payload =
+      'fixed_term_end' in updates && !('lease_reminder_sent_at' in updates)
+        ? { ...updates, lease_reminder_sent_at: null }
+        : updates;
     const { data, error } = await supabase
       .from('tenants')
-      .update(updates)
+      .update(payload)
       .eq('id', tenantId)
       .select()
       .single();
@@ -836,6 +845,7 @@ export const PropertyProvider = ({ children }) => {
         .single();
       if (updateError) throw updateError;
       setRentRates((prev) => prev.map((r) => (r.id === openRate.id ? updatedRate : r)));
+      await regenerateUnpaidRentBillsForTenant(tenantId);
       return updatedRate;
     }
 
@@ -886,6 +896,7 @@ export const PropertyProvider = ({ children }) => {
       .single();
     if (error) throw error;
     setRentRates((prev) => [...prev, data]);
+    await regenerateUnpaidRentBillsForTenant(tenantId);
     return data;
   };
 
@@ -900,6 +911,108 @@ export const PropertyProvider = ({ children }) => {
     const { error } = await supabase.from('rent_rates').delete().eq('id', rateId);
     if (error) throw error;
     setRentRates((prev) => prev.filter((r) => r.id !== rateId));
+  };
+
+  // 2026-08-17 (Chris's call): a rate change — amount or frequency, either
+  // one changes what's owed — shouldn't wait for the next login/refresh
+  // cycle to take effect. This regenerates the tenant's not-yet-paid rent
+  // bills right away, so a frequency change agreed with a tenant mid-
+  // conversation is reflected immediately.
+  //
+  // Only ever touches a bill_split with amount_paid = 0 — anything with
+  // real money already recorded against it (paid or partial) is left
+  // completely alone, same as the "never modify a sent bill's split"
+  // guardrail everywhere else in this app. A shared bill that still has
+  // other (monthly-cadence) tenants on it has only this tenant's own split
+  // removed and the bill's total adjusted; a bill that was only ever this
+  // tenant's is deleted outright. Regeneration then runs the same
+  // per-tenant weekly/fortnightly generation logic as the normal login-
+  // time sweep, resuming from whatever coverage remains — so there's no
+  // overlap and no gap, exactly like the sweep's own cutover guarantee.
+  const regenerateUnpaidRentBillsForTenant = async (tenantId) => {
+    const tenant = tenants.find((t) => t.id === tenantId);
+    const property = properties.find((p) => p.id === tenant?.property_id);
+    if (!tenant || !property) return;
+
+    const { data: unpaidSplits, error: fetchError } = await supabase
+      .from('bill_splits')
+      .select('id, owed_amount, bill_id, bills!inner(id, bill_type, total_amount)')
+      .eq('tenant_id', tenantId)
+      .eq('bills.bill_type', 'rent')
+      .neq('status', 'paid')
+      .eq('amount_paid', 0);
+    if (fetchError) throw fetchError;
+
+    for (const split of unpaidSplits || []) {
+      const bill = split.bills;
+      const { count } = await supabase
+        .from('bill_splits')
+        .select('id', { count: 'exact', head: true })
+        .eq('bill_id', bill.id);
+      if ((count ?? 0) <= 1) {
+        await deleteBill(bill.id);
+      } else {
+        const { error: splitDeleteError } = await supabase.from('bill_splits').delete().eq('id', split.id);
+        if (splitDeleteError) throw splitDeleteError;
+        await supabase
+          .from('bills')
+          .update({ total_amount: Number(bill.total_amount) - Number(split.owed_amount) })
+          .eq('id', bill.id);
+        setBillSplits((prev) => prev.filter((s) => s.id !== split.id));
+      }
+    }
+
+    // Current rate's frequency decides whether there's anything to
+    // regenerate here at all — a tenant back on 'monthly' is covered by
+    // the ordinary shared-bill sweep on the next refresh, not this path.
+    const currentRate = rentRates.find((r) => r.tenant_id === tenantId && !r.effective_to);
+    const stepDays = currentRate?.frequency === 'weekly' ? 7 : currentRate?.frequency === 'fortnightly' ? 14 : null;
+    if (!stepDays) {
+      await refresh();
+      return;
+    }
+
+    // Fresh, tenant-scoped read of remaining rent coverage (after the
+    // deletes above) to find where generation should resume from.
+    const { data: remainingSplits, error: remainingError } = await supabase
+      .from('bill_splits')
+      .select('bills!inner(bill_type, billing_period_end)')
+      .eq('tenant_id', tenantId);
+    if (remainingError) throw remainingError;
+    const existingEnds = (remainingSplits || [])
+      .filter((s) => s.bills.bill_type === 'rent')
+      .map((s) => s.bills.billing_period_end);
+
+    const todayStr = todayLocal();
+    const resumeFrom = nextPerTenantRentStartDate(tenant.move_in_date, existingEnds);
+    if (resumeFrom > todayStr) {
+      await refresh();
+      return;
+    }
+
+    const periods = buildSteppedPeriods(resumeFrom, todayStr, stepDays);
+    for (const period of periods) {
+      const charges = buildRentCharges([tenant], rentRates, period.start, period.end);
+      if (charges.length === 0) continue;
+      try {
+        const inserted = await insertRentBillRow(property.id, period.start, period.end, period.end, charges, tenant.id);
+        const periodContainsToday = period.start <= todayStr && todayStr <= period.end;
+        if (periodContainsToday && tenant.email && landlordSettings?.notify_rent !== false) {
+          for (const s of inserted.splits) {
+            try {
+              await sendBillEmail(s.id);
+            } catch (err) {
+              console.error('Failed to auto-send regenerated rent bill email:', err);
+            }
+          }
+        }
+      } catch (err) {
+        if (err.code !== '23505') {
+          console.error('Failed to regenerate per-tenant rent bill:', err);
+        }
+      }
+    }
+    await refresh();
   };
 
   // Rent works differently from a shared utility bill: each tenant is

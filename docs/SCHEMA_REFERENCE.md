@@ -48,7 +48,8 @@ columns in the schema: `rent_rates.amount_cents`, `plans.price_cents_monthly`,
 | `payment_status` | text | legacy, check `('paid','pending','overdue')` — not the same as `bill_splits.status` |
 | `number_of_occupants` | integer | > 0 |
 | `status` | text | `default 'active'`, used for archival (`'former'` etc.) instead of hard delete |
-| `fixed_term_end` | date | nullable |
+| `fixed_term_end` | date | nullable — the tenant's current lease-term expiry, distinct from `move_out_date` (a lease can be extended, pushing this forward, without the tenant ever having given notice to leave) |
+| `lease_reminder_sent_at` | timestamptz | nullable — set when the "lease ends in 4 weeks" landlord reminder has fired for the current `fixed_term_end`; cleared whenever `fixed_term_end` changes so an extension gets its own future reminder |
 | `landlord_id` | uuid | → `auth.users(id)` |
 | `property_id` | uuid | → `properties(id)` |
 | `created_at` / `updated_at` | timestamptz | |
