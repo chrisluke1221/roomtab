@@ -20,6 +20,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { useProperties } from '../contexts/PropertyContext';
+import { amountForFrequency } from '../lib/rentCalc';
 import Money from '../components/Money';
 import OwedBreakdown from '../components/OwedBreakdown';
 import StatusBadge from '../components/StatusBadge';
@@ -1098,7 +1099,7 @@ const PropertyDetail = () => {
                           <li key={i} className="flex justify-between">
                             <span>
                               {seg.from} to {seg.to} ({seg.days} day{seg.days === 1 ? '' : 's'} @{' '}
-                              <Money cents={seg.amountCents} />/{seg.frequency})
+                              <Money cents={seg.amountCents} />/week)
                             </span>
                             <Money cents={seg.cents} className="font-medium" />
                           </li>
@@ -1144,7 +1145,7 @@ const PropertyDetail = () => {
                       {split.rate_breakdown.map((seg, i) => (
                         <li key={i} className="flex justify-between">
                           <span>
-                            {seg.from} to {seg.to} ({seg.days}d @ <Money cents={seg.amountCents} />/{seg.frequency})
+                            {seg.from} to {seg.to} ({seg.days}d @ <Money cents={seg.amountCents} />/week)
                           </span>
                           <Money cents={seg.cents} className="font-medium" />
                         </li>
@@ -1391,7 +1392,9 @@ const PropertyDetail = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">
               <div>
                 <label className="block text-sm font-medium text-secondary-900 mb-1.5">
-                  {editingTenantId ? 'Rent (leave unchanged to keep the current rate)' : 'Rent (optional — can set later)'}
+                  {editingTenantId
+                    ? 'Rent per week (leave unchanged to keep the current rate)'
+                    : 'Rent per week (optional — can set later)'}
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400">$</span>
@@ -1404,9 +1407,10 @@ const PropertyDetail = () => {
                     onChange={(e) => setTenantForm((p) => ({ ...p, rentAmount: e.target.value }))}
                   />
                 </div>
+                <p className="text-xs text-secondary-400 mt-1">Always the weekly rent, even if billed monthly or fortnightly below.</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-secondary-900 mb-1.5">Frequency</label>
+                <label className="block text-sm font-medium text-secondary-900 mb-1.5">Billed</label>
                 <select
                   className="input-field"
                   value={tenantForm.rentFrequency}
@@ -1416,6 +1420,9 @@ const PropertyDetail = () => {
                   <option value="fortnightly">Fortnightly</option>
                   <option value="monthly">Monthly</option>
                 </select>
+                <p className="text-xs text-secondary-400 mt-1">
+                  How this tenant is billed and reminded — the amount is calculated from the weekly rent above.
+                </p>
               </div>
             </div>
             {tenantError && <p className="text-danger-600 text-sm">{tenantError}</p>}
@@ -1545,9 +1552,17 @@ const PropertyDetail = () => {
                 <p className="text-xs text-secondary-500 mb-2">Room: {tenant.room}</p>
 
                 {currentRateFor(tenant.id) ? (
-                  <p className="text-sm text-secondary-700 flex items-center">
-                    <Money cents={currentRateFor(tenant.id).amount_cents} className="text-secondary-700" />/{currentRateFor(tenant.id).frequency}
-                    <span className="text-secondary-400 ml-1">since {currentRateFor(tenant.id).effective_from}</span>
+                  <p className="text-sm text-secondary-700">
+                    <span className="flex items-center">
+                      <Money cents={currentRateFor(tenant.id).amount_cents} className="text-secondary-700" />/week
+                      <span className="text-secondary-400 ml-1">since {currentRateFor(tenant.id).effective_from}</span>
+                    </span>
+                    {currentRateFor(tenant.id).frequency !== 'weekly' && (
+                      <span className="text-xs text-secondary-500">
+                        billed {currentRateFor(tenant.id).frequency} (
+                        <Money cents={amountForFrequency(currentRateFor(tenant.id).amount_cents, currentRateFor(tenant.id).frequency)} />)
+                      </span>
+                    )}
                   </p>
                 ) : (
                   <p className="text-sm text-secondary-400">No rent rate set</p>
@@ -1566,7 +1581,7 @@ const PropertyDetail = () => {
                   >
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <div>
-                        <label className="block text-xs text-secondary-500 mb-1">Amount</label>
+                        <label className="block text-xs text-secondary-500 mb-1">Amount per week</label>
                         <div className="relative">
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-secondary-400 text-sm">$</span>
                           <input
@@ -1579,7 +1594,7 @@ const PropertyDetail = () => {
                         </div>
                       </div>
                       <div>
-                        <label className="block text-xs text-secondary-500 mb-1">Frequency</label>
+                        <label className="block text-xs text-secondary-500 mb-1">Billed</label>
                         <select
                           className="input-field text-sm"
                           value={rateForm.frequency}
@@ -1621,7 +1636,8 @@ const PropertyDetail = () => {
                     {rateHistoryFor(tenant.id).map((r) => (
                       <li key={r.id} className="text-xs text-secondary-500 flex items-center justify-between">
                         <span>
-                          <Money cents={r.amount_cents} className="text-secondary-500" />/{r.frequency} &middot; {r.effective_from} to{' '}
+                          <Money cents={r.amount_cents} className="text-secondary-500" />/week
+                          {r.frequency !== 'weekly' ? ` (billed ${r.frequency})` : ''} &middot; {r.effective_from} to{' '}
                           {r.effective_to || 'ongoing'}
                         </span>
                         <button onClick={() => handleDeleteRate(r.id)} className="text-secondary-300 hover:text-danger-600">

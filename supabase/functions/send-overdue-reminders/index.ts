@@ -63,13 +63,21 @@ const TEMPLATES = {
   },
 };
 
-const buildEmailHtml = (stageKey, tenantName, billType, dueDate, amount, billLink) => {
+const buildEmailHtml = (stageKey, tenantName, billType, dueDate, amount, billLink, rentFrequency) => {
   const t = TEMPLATES[stageKey];
+  // 2026-08-13: for a rent bill, name the billing cadence alongside the
+  // amount — a tenant billed monthly shouldn't have to guess whether $X is
+  // their weekly or monthly figure from the amount alone.
+  const frequencyNote =
+    billType === 'rent' && rentFrequency
+      ? `<p style="color:#64748b;font-size:13px;margin-top:-4px;">Billed ${rentFrequency}</p>`
+      : '';
   return `
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; color: #1e293b;">
       <h2 style="text-transform: capitalize;">${t.heading}</h2>
       ${t.body(tenantName, billType, dueDate)}
       <p style="font-size: 28px; font-weight: bold; color: #0d9488;">$${amount}</p>
+      ${frequencyNote}
       <p>
         <a href="${billLink}" style="display:inline-block;background:#0d9488;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">
           ${t.cta}
@@ -153,7 +161,14 @@ Deno.serve(async (req) => {
         ? stageForDaysOverdue(daysOverdue)
         : 'friendly';
 
-      const html = buildEmailHtml(stageKey, tenantName, billType, split.bills.due_date, amount, billLink);
+      // rate_breakdown is already stored on the split at bill-generation time
+      // (src/lib/rentCalc.js's segments) — the last segment's frequency is
+      // the cadence this bill was actually billed at, no extra query needed.
+      const rentFrequency = Array.isArray(split.rate_breakdown) && split.rate_breakdown.length > 0
+        ? split.rate_breakdown[split.rate_breakdown.length - 1].frequency
+        : null;
+
+      const html = buildEmailHtml(stageKey, tenantName, billType, split.bills.due_date, amount, billLink, rentFrequency);
       const subject = TEMPLATES[stageKey].subject(split.bills.bill_type);
 
       const resendRes = await fetch('https://api.resend.com/emails', {

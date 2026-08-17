@@ -315,7 +315,7 @@ export const PropertyProvider = ({ children }) => {
           tenant_id: data.id,
           landlord_id: user.id,
           amount_cents: rentAmountCents,
-          frequency: rentFrequency || 'monthly',
+          frequency: rentFrequency || 'weekly',
           effective_from: moveInDate,
         })
         .select()

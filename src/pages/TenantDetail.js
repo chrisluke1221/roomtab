@@ -16,6 +16,7 @@ import OwedBreakdown from '../components/OwedBreakdown';
 import StatusBadge from '../components/StatusBadge';
 import SplitActions from '../components/SplitActions';
 import { effectiveStatus, isOutstanding } from '../lib/paymentStatus';
+import { amountForFrequency } from '../lib/rentCalc';
 
 // Per-tenant detail page — the landlord's "at a glance" view for one tenant.
 // Reuses all context data already loaded by PropertyContext; no new queries.
@@ -190,7 +191,7 @@ const TenantDetail = () => {
                   <li key={i} className="flex justify-between">
                     <span>
                       {seg.from} to {seg.to} ({seg.days} day{seg.days === 1 ? '' : 's'} @{' '}
-                      <Money cents={seg.amountCents} />/{seg.frequency})
+                      <Money cents={seg.amountCents} />/week)
                     </span>
                     <Money cents={seg.cents} className="font-medium" />
                   </li>
@@ -239,7 +240,7 @@ const TenantDetail = () => {
                       {split.rate_breakdown.map((seg, i) => (
                         <li key={i} className="flex justify-between">
                           <span>
-                            {seg.from} to {seg.to} ({seg.days}d @ <Money cents={seg.amountCents} />/{seg.frequency})
+                            {seg.from} to {seg.to} ({seg.days}d @ <Money cents={seg.amountCents} />/week)
                           </span>
                           <Money cents={seg.cents} className="font-medium" />
                         </li>
@@ -350,8 +351,15 @@ const TenantDetail = () => {
               <p className="text-sm text-secondary-600 mt-2">
                 Current rent:{' '}
                 <span className="font-semibold text-secondary-900">
-                  <Money cents={currentRate.amount_cents} />/{currentRate.frequency}
+                  <Money cents={currentRate.amount_cents} />/week
                 </span>
+                {currentRate.frequency !== 'weekly' && (
+                  <span className="text-secondary-500">
+                    {' '}
+                    (billed {currentRate.frequency}:{' '}
+                    <Money cents={amountForFrequency(currentRate.amount_cents, currentRate.frequency)} />)
+                  </span>
+                )}
                 <span className="text-secondary-400 text-xs ml-1">since {currentRate.effective_from}</span>
               </p>
             ) : (
