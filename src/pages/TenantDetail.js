@@ -15,8 +15,13 @@ import Money from '../components/Money';
 import OwedBreakdown from '../components/OwedBreakdown';
 import StatusBadge from '../components/StatusBadge';
 import SplitActions from '../components/SplitActions';
+import BillActivityTimeline from '../components/BillActivityTimeline';
 import { effectiveStatus, isOutstanding } from '../lib/paymentStatus';
 import { amountForFrequency } from '../lib/rentCalc';
+import { todayLocal } from '../lib/dates';
+import ConfirmModal from '../components/ConfirmModal';
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Per-tenant detail page — the landlord's "at a glance" view for one tenant.
 // Reuses all context data already loaded by PropertyContext; no new queries.
@@ -36,11 +41,24 @@ const TenantDetail = () => {
     recordPartialPayment,
     sendBillEmail,
     revokeSplitToken,
+    updateTenant,
+    addRentRate,
   } = useProperties();
 
   const [sendingSplitId, setSendingSplitId] = useState(null);
   const [emailError, setEmailError] = useState('');
   const [expandedBreakdownSplitId, setExpandedBreakdownSplitId] = useState(null);
+  const [expandedActivitySplitId, setExpandedActivitySplitId] = useState(null);
+
+  // Inline tenant edit — 2026-08-13: replaces the old "Edit tenant details"
+  // link out to the property's full tenant list (find this tenant again,
+  // click Edit again) with editing right here, since we're already looking
+  // at this exact tenant.
+  const [isEditingTenant, setIsEditingTenant] = useState(false);
+  const [tenantEditForm, setTenantEditForm] = useState(null);
+  const [tenantEditError, setTenantEditError] = useState('');
+  const [tenantEditSubmitting, setTenantEditSubmitting] = useState(false);
+  const [tenantEditConfirm, setTenantEditConfirm] = useState(null);
 
   // Pagination: show 10 rows at a time, with a "Load more" button.
   const PAGE_SIZE = 10;
@@ -81,6 +99,95 @@ const TenantDetail = () => {
 
   // Current open-ended rate (no effective_to) for this tenant.
   const currentRate = rentRates.filter((r) => r.tenant_id === tenantId).find((r) => !r.effective_to);
+
+  const handleStartEditTenant = () => {
+    setTenantEditForm({
+      name: tenant.name,
+      email: tenant.email || '',
+      phone: tenant.phone || '',
+      room: tenant.room,
+      moveInDate: tenant.move_in_date,
+      moveOutDate: tenant.move_out_date || '',
+      numberOfOccupants: tenant.number_of_occupants,
+      rentAmount: currentRate ? String(currentRate.amount_cents / 100) : '',
+      rentFrequency: currentRate ? currentRate.frequency : 'weekly',
+    });
+    setTenantEditError('');
+    setIsEditingTenant(true);
+  };
+
+  const saveTenantEdit = async (rentAmount, shouldCreateRate) => {
+    setTenantEditSubmitting(true);
+    setTenantEditError('');
+    try {
+      await updateTenant(tenantId, {
+        name: tenantEditForm.name.trim(),
+        email: tenantEditForm.email.trim() || null,
+        phone: tenantEditForm.phone.trim() || null,
+        room: tenantEditForm.room.trim(),
+        move_in_date: tenantEditForm.moveInDate,
+        move_out_date: tenantEditForm.moveOutDate || null,
+        number_of_occupants: tenantEditForm.numberOfOccupants,
+      });
+      if (shouldCreateRate) {
+        await addRentRate(tenantId, {
+          amountCents: Math.round(rentAmount * 100),
+          frequency: tenantEditForm.rentFrequency,
+          effectiveFrom: todayLocal(),
+        });
+      }
+      setIsEditingTenant(false);
+      setTenantEditForm(null);
+    } catch (err) {
+      console.error('Failed to save tenant:', err);
+      setTenantEditError(err.message || 'Failed to save tenant');
+    } finally {
+      setTenantEditSubmitting(false);
+    }
+  };
+
+  const handleTenantEditSubmit = (e) => {
+    e.preventDefault();
+    setTenantEditError('');
+    if (!tenantEditForm.name.trim() || !tenantEditForm.room.trim()) {
+      setTenantEditError('Name and room are required');
+      return;
+    }
+    if (tenantEditForm.moveOutDate && tenantEditForm.moveOutDate < tenantEditForm.moveInDate) {
+      setTenantEditError('Move-out date must be on or after the move-in date');
+      return;
+    }
+    if (tenantEditForm.email.trim() && !EMAIL_PATTERN.test(tenantEditForm.email.trim())) {
+      setTenantEditError('That email address doesn\'t look valid');
+      return;
+    }
+    const rentAmount = parseFloat(tenantEditForm.rentAmount);
+    if (tenantEditForm.rentAmount && (!rentAmount || rentAmount <= 0)) {
+      setTenantEditError('Rent must be a positive amount, or left blank to keep unchanged');
+      return;
+    }
+    // Same pattern as PropertyDetail.js's tenant edit — a changed rate always
+    // starts a new dated rate (via addRentRate), never overwrites history.
+    const rateChanged = Boolean(
+      rentAmount &&
+        currentRate &&
+        (Math.round(rentAmount * 100) !== currentRate.amount_cents || tenantEditForm.rentFrequency !== currentRate.frequency)
+    );
+    const isFirstRate = Boolean(rentAmount && !currentRate);
+    if (rateChanged) {
+      setTenantEditConfirm({
+        title: 'Start a new rate from today?',
+        message: `This won't change any bill already sent — it starts a new rate effective today (${todayLocal()}), and the old rate stays exactly as it was for past bills.`,
+        confirmLabel: 'Save & start new rate',
+        onConfirm: () => {
+          setTenantEditConfirm(null);
+          saveTenantEdit(rentAmount, true);
+        },
+      });
+      return;
+    }
+    saveTenantEdit(rentAmount, isFirstRate);
+  };
 
   // Total outstanding across all bill types.
   const totalOwedCents = billSplits
@@ -171,15 +278,23 @@ const TenantDetail = () => {
             <StatusBadge status={status} />
           </td>
           <td className="py-2 text-right">
-            <SplitActions
-              split={split}
-              sendingSplitId={sendingSplitId}
-              onRevoke={handleRevokeLink}
-              onSetStatus={setBillSplitStatus}
-              onRecordPayment={recordPartialPayment}
-              onSendEmail={handleSendEmail}
-              billHasAttachment={!!bill.attachment_path}
-            />
+            <div className="flex items-center justify-end space-x-2">
+              <SplitActions
+                split={split}
+                sendingSplitId={sendingSplitId}
+                onRevoke={handleRevokeLink}
+                onSetStatus={setBillSplitStatus}
+                onRecordPayment={recordPartialPayment}
+                onSendEmail={handleSendEmail}
+                billHasAttachment={!!bill.attachment_path}
+              />
+              <button
+                onClick={() => setExpandedActivitySplitId((id) => (id === split.id ? null : split.id))}
+                className="text-xs text-secondary-400 hover:text-primary-600 whitespace-nowrap"
+              >
+                {expandedActivitySplitId === split.id ? 'Hide' : 'View'} activity
+              </button>
+            </div>
           </td>
         </tr>
         {/* Rate breakdown expansion row (desktop) */}
@@ -197,6 +312,13 @@ const TenantDetail = () => {
                   </li>
                 ))}
               </ul>
+            </td>
+          </tr>
+        )}
+        {expandedActivitySplitId === split.id && (
+          <tr className="hidden sm:table-row bg-secondary-50">
+            <td colSpan={4} className="py-2 px-3">
+              <BillActivityTimeline billId={bill.id} />
             </td>
           </tr>
         )}
@@ -259,7 +381,18 @@ const TenantDetail = () => {
                   onSendEmail={handleSendEmail}
                   billHasAttachment={!!bill.attachment_path}
                 />
+                <button
+                  onClick={() => setExpandedActivitySplitId((id) => (id === split.id ? null : split.id))}
+                  className="text-xs text-secondary-400 hover:text-primary-600"
+                >
+                  {expandedActivitySplitId === split.id ? 'Hide' : 'View'} activity
+                </button>
               </div>
+              {expandedActivitySplitId === split.id && (
+                <div className="mt-2 bg-secondary-50 rounded p-2">
+                  <BillActivityTimeline billId={bill.id} />
+                </div>
+              )}
             </div>
           </td>
         </tr>
@@ -368,14 +501,144 @@ const TenantDetail = () => {
           </div>
         </div>
         <div className="mt-4 pt-4 border-t border-secondary-100">
-          <Link
-            to={`/properties/${propertyId}?tab=tenants`}
-            className="text-sm text-primary-600 hover:text-primary-700 font-medium"
-          >
-            Edit tenant details &rarr;
-          </Link>
+          {!isEditingTenant ? (
+            <button
+              onClick={handleStartEditTenant}
+              className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+            >
+              Edit tenant details
+            </button>
+          ) : (
+            <form onSubmit={handleTenantEditSubmit} className="space-y-4 bg-secondary-50 rounded-lg p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Name</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={tenantEditForm.name}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, name: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Room</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={tenantEditForm.room}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, room: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Occupants in this room</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="input-field"
+                    value={tenantEditForm.numberOfOccupants}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, numberOfOccupants: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Email (optional)</label>
+                  <input
+                    type="email"
+                    className="input-field"
+                    value={tenantEditForm.email}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, email: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Phone (optional)</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={tenantEditForm.phone}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, phone: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Move-in date</label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={tenantEditForm.moveInDate}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, moveInDate: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Move-out date (optional)</label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={tenantEditForm.moveOutDate}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, moveOutDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">
+                    Rent per week (leave unchanged to keep the current rate)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary-400">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="input-field pl-7"
+                      placeholder="0.00"
+                      value={tenantEditForm.rentAmount}
+                      onChange={(e) => setTenantEditForm((p) => ({ ...p, rentAmount: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-secondary-900 mb-1.5">Billed</label>
+                  <select
+                    className="input-field"
+                    value={tenantEditForm.rentFrequency}
+                    onChange={(e) => setTenantEditForm((p) => ({ ...p, rentFrequency: e.target.value }))}
+                  >
+                    <option value="weekly">Weekly</option>
+                    <option value="fortnightly">Fortnightly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+              </div>
+              {tenantEditError && <p className="text-danger-600 text-sm">{tenantEditError}</p>}
+              <div className="flex space-x-3">
+                <button type="submit" disabled={tenantEditSubmitting} className="btn-primary">
+                  {tenantEditSubmitting ? 'Saving...' : 'Save Changes'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setIsEditingTenant(false);
+                    setTenantEditForm(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
+
+      <ConfirmModal
+        open={!!tenantEditConfirm}
+        title={tenantEditConfirm?.title}
+        message={tenantEditConfirm?.message}
+        confirmLabel={tenantEditConfirm?.confirmLabel}
+        onConfirm={tenantEditConfirm?.onConfirm}
+        onCancel={() => setTenantEditConfirm(null)}
+      />
 
       {emailError && <p className="text-danger-600 text-sm mb-4">{emailError}</p>}
 

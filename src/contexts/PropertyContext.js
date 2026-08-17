@@ -1173,6 +1173,21 @@ export const PropertyProvider = ({ children }) => {
     }
   };
 
+  // Read-side counterpart, used by BillActivityTimeline — landlords already
+  // have SELECT RLS on bill_events for their own bills (Phase B), so this is
+  // a plain client-side query, no RPC needed. Fetched on demand per bill
+  // rather than bulk-loaded into context state, since most bills' activity
+  // is never actually viewed.
+  const fetchBillEvents = async (billId) => {
+    const { data, error } = await supabase
+      .from('bill_events')
+      .select('*')
+      .eq('bill_id', billId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  };
+
   const deleteBill = async (billId) => {
     const bill = bills.find((b) => b.id === billId);
     if (bill?.attachment_path) {
@@ -1366,6 +1381,7 @@ export const PropertyProvider = ({ children }) => {
     loading,
     error,
     refresh,
+    fetchBillEvents,
     setBillSplitStatus,
     recordPartialPayment,
     sendBillEmail,

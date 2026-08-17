@@ -24,6 +24,7 @@ import { amountForFrequency } from '../lib/rentCalc';
 import Money from '../components/Money';
 import OwedBreakdown from '../components/OwedBreakdown';
 import StatusBadge from '../components/StatusBadge';
+import BillActivityTimeline from '../components/BillActivityTimeline';
 import SplitActions from '../components/SplitActions';
 import ConfirmModal from '../components/ConfirmModal';
 import { effectiveStatus, isOutstanding } from '../lib/paymentStatus';
@@ -120,6 +121,7 @@ const PropertyDetail = () => {
   const [rateError, setRateError] = useState('');
   const [rateSubmitting, setRateSubmitting] = useState(false);
   const [expandedBreakdownSplitId, setExpandedBreakdownSplitId] = useState(null);
+  const [expandedActivitySplitId, setExpandedActivitySplitId] = useState(null);
 
   const [sendingSplitId, setSendingSplitId] = useState(null);
   const [emailError, setEmailError] = useState('');
@@ -1078,7 +1080,7 @@ const PropertyDetail = () => {
                     <StatusBadge status={effectiveStatus(split, bill)} />
                   </td>
                   <td className="py-1 text-right">
-                    <div className="flex items-center justify-end">
+                    <div className="flex items-center justify-end space-x-2">
                       <SplitActions
                         split={split}
                         sendingSplitId={sendingSplitId}
@@ -1088,6 +1090,14 @@ const PropertyDetail = () => {
                         onSendEmail={handleSendEmail}
                         billHasAttachment={!!bill.attachment_path}
                       />
+                      <button
+                        onClick={() =>
+                          setExpandedActivitySplitId((id) => (id === split.id ? null : split.id))
+                        }
+                        className="text-xs text-secondary-400 hover:text-primary-600 whitespace-nowrap"
+                      >
+                        {expandedActivitySplitId === split.id ? 'Hide' : 'View'} activity
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1105,6 +1115,13 @@ const PropertyDetail = () => {
                           </li>
                         ))}
                       </ul>
+                    </td>
+                  </tr>
+                )}
+                {expandedActivitySplitId === split.id && (
+                  <tr className="bg-secondary-50">
+                    <td colSpan={6} className="py-2 px-3">
+                      <BillActivityTimeline billId={bill.id} />
                     </td>
                   </tr>
                 )}
@@ -1165,7 +1182,18 @@ const PropertyDetail = () => {
                   onSendEmail={handleSendEmail}
                   billHasAttachment={!!bill.attachment_path}
                 />
+                <button
+                  onClick={() => setExpandedActivitySplitId((id) => (id === split.id ? null : split.id))}
+                  className="text-xs text-secondary-400 hover:text-primary-600"
+                >
+                  {expandedActivitySplitId === split.id ? 'Hide' : 'View'} activity
+                </button>
               </div>
+              {expandedActivitySplitId === split.id && (
+                <div className="mt-2 bg-secondary-50 rounded p-2">
+                  <BillActivityTimeline billId={bill.id} />
+                </div>
+              )}
             </div>
           ))}
         </div>
