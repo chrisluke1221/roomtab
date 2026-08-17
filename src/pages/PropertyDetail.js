@@ -106,6 +106,7 @@ const PropertyDetail = () => {
     deleteBill,
     setBillSplitStatus,
     recordPartialPayment,
+    markPastRentSettled,
     sendBillEmail,
     revokeSplitToken,
     uploadBillAttachment,
@@ -446,11 +447,34 @@ const PropertyDetail = () => {
           });
         }
       } else {
-        await createTenant({
+        const newTenant = await createTenant({
           propertyId,
           ...tenantForm,
           rentAmountCents: rentAmount ? Math.round(rentAmount * 100) : null,
         });
+        // 2026-08-13: a new tenant with a move-in date in the past will get
+        // rent auto-backfilled for every month since then (silently, per
+        // generateDueRentBillsInner) — ask once whether that history is
+        // already settled instead of leaving a wall of misleading "overdue"
+        // bills for rent that was actually already paid before Settleroo.
+        if (rentAmount && tenantForm.moveInDate && tenantForm.moveInDate < today()) {
+          setConfirmState({
+            title: 'Already settled?',
+            message: `Has ${tenantForm.name.trim()}'s rent from ${tenantForm.moveInDate} up to today already been paid? If so, the bills Settleroo generates for that period will be marked settled automatically instead of showing as overdue.`,
+            confirmLabel: 'Yes, already settled',
+            onConfirm: async () => {
+              setConfirmState(null);
+              try {
+                await refresh(); // lets the backfill generation run server-side
+                await markPastRentSettled(newTenant.id);
+                await refresh(); // pulls the newly-generated, now-paid bills into local state
+              } catch (err) {
+                console.error('Failed to mark past rent settled:', err);
+                setTenantError(err.message || 'Failed to mark past rent as settled');
+              }
+            },
+          });
+        }
       }
       setTenantForm(emptyTenant);
       setEditingTenantId(null);

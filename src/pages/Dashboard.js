@@ -46,6 +46,10 @@ const Dashboard = () => {
   const [filterPropertyId, setFilterPropertyId] = useState('all');
   const [filterType, setFilterType] = useState('all');
   const [balanceSearch, setBalanceSearch] = useState('');
+  // 2026-08-13: bulk-select for the work queue — clearing a batch of overdue
+  // rows one Mark Paid click at a time was the exact friction Chris flagged.
+  const [selectedSplitIds, setSelectedSplitIds] = useState([]);
+  const [bulkMarking, setBulkMarking] = useState(false);
   const navigate = useNavigate();
 
   // CHR-34 Phase C: load subscription state to show 'Manage billing' for
@@ -163,6 +167,35 @@ const Dashboard = () => {
       setActionError(err.message || 'Failed to send email');
     } finally {
       setSendingSplitId(null);
+    }
+  };
+
+  const toggleSelectSplit = (splitId) => {
+    setSelectedSplitIds((prev) =>
+      prev.includes(splitId) ? prev.filter((id) => id !== splitId) : [...prev, splitId]
+    );
+  };
+
+  const handleBulkMarkPaid = async (rows) => {
+    const ids = rows.map(({ split }) => split.id).filter((id) => selectedSplitIds.includes(id));
+    if (ids.length === 0) return;
+    if (!window.confirm(`Mark ${ids.length} bill${ids.length === 1 ? '' : 's'} as paid?`)) return;
+    setBulkMarking(true);
+    setActionError('');
+    try {
+      // Sequential, not Promise.all — mirrors the single-row mark-paid path
+      // exactly (one at a time via the same setBillSplitStatus call), so a
+      // partial failure part-way through a large batch doesn't leave the
+      // context's local state and the DB in different shapes.
+      for (const id of ids) {
+        await setBillSplitStatus(id, 'paid');
+      }
+      setSelectedSplitIds([]);
+    } catch (err) {
+      console.error('Bulk mark-paid failed:', err);
+      setActionError(err.message || 'Failed to mark some bills as paid');
+    } finally {
+      setBulkMarking(false);
     }
   };
 
@@ -477,6 +510,33 @@ const Dashboard = () => {
         </div>
       </div>
 
+      {/* 2026-08-13: bulk mark-paid — appears once at least one row is
+          checked, so clearing a batch of reconciled payments doesn't mean
+          clicking Mark Paid once per row. */}
+      {workQueue.length > 0 && (
+        <div className="flex items-center space-x-3 mb-2 text-sm">
+          <label className="flex items-center space-x-2 text-secondary-500 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={workQueue.length > 0 && workQueue.every(({ split }) => selectedSplitIds.includes(split.id))}
+              onChange={(e) =>
+                setSelectedSplitIds(e.target.checked ? workQueue.map(({ split }) => split.id) : [])
+              }
+            />
+            <span>Select all</span>
+          </label>
+          {selectedSplitIds.length > 0 && (
+            <button
+              onClick={() => handleBulkMarkPaid(workQueue)}
+              disabled={bulkMarking}
+              className="text-primary-600 hover:text-primary-700 font-medium disabled:opacity-50"
+            >
+              {bulkMarking ? 'Marking...' : `Mark ${selectedSplitIds.length} as paid`}
+            </button>
+          )}
+        </div>
+      )}
+
       {actionError && <p className="text-danger-600 text-sm mb-3">{actionError}</p>}
 
       {workQueue.length === 0 ? (
@@ -498,16 +558,24 @@ const Dashboard = () => {
                 key={split.id}
                 className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-6 py-4"
               >
-                <div>
-                  <Link
-                    to={`/properties/${bill.property_id}/tenants/${split.tenant_id}`}
-                    className="font-medium text-secondary-900 hover:text-primary-600"
-                  >
-                    {property?.name || 'Property'} &middot; {split.tenant_name}
-                  </Link>
-                  <p className="text-sm text-secondary-500 capitalize">
-                    {bill.bill_type} bill{bill.due_date && <> &middot; {isOverdue ? 'was due' : 'due'} {bill.due_date}</>}
-                  </p>
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1.5"
+                    checked={selectedSplitIds.includes(split.id)}
+                    onChange={() => toggleSelectSplit(split.id)}
+                  />
+                  <div>
+                    <Link
+                      to={`/properties/${bill.property_id}/tenants/${split.tenant_id}`}
+                      className="font-medium text-secondary-900 hover:text-primary-600"
+                    >
+                      {property?.name || 'Property'} &middot; {split.tenant_name}
+                    </Link>
+                    <p className="text-sm text-secondary-500 capitalize">
+                      {bill.bill_type} bill{bill.due_date && <> &middot; {isOverdue ? 'was due' : 'due'} {bill.due_date}</>}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center justify-between sm:justify-end gap-3">
                   <div className="text-right">
