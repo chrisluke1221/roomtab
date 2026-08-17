@@ -3,7 +3,12 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from './AuthContext';
 import { computeSplits, computeFlatSplitByHeadcount, usesFlatSplit } from '../lib/billSplit';
 import { computeRentForPeriod, ratesOverlap, findOverlappingRate } from '../lib/rentCalc';
-import { earliestGenerationMonthForProperty, buildGenerationPeriods } from '../lib/rentGeneration';
+import {
+  earliestGenerationMonthForProperty,
+  buildGenerationPeriods,
+  buildSteppedPeriods,
+  nextPerTenantRentStartDate,
+} from '../lib/rentGeneration';
 import { formatLocalDate, todayLocal } from '../lib/dates';
 import { EntitlementError } from '../lib/entitlements';
 
@@ -121,6 +126,7 @@ export const PropertyProvider = ({ children }) => {
         properties: propertiesData ?? [],
         tenants: tenantsData ?? [],
         bills: billsData ?? [],
+        billSplits: billSplitsData ?? [],
         rentRates: rentRatesData ?? [],
         settings,
       });
@@ -927,7 +933,7 @@ export const PropertyProvider = ({ children }) => {
       .filter((c) => c.totalCents > 0);
   };
 
-  const insertRentBillRow = async (propertyId, periodStart, periodEnd, dueDate, charges) => {
+  const insertRentBillRow = async (propertyId, periodStart, periodEnd, dueDate, charges, tenantId = null) => {
     const totalCents = charges.reduce((sum, c) => sum + c.totalCents, 0);
 
     const { data: bill, error: billError } = await supabase
@@ -935,6 +941,7 @@ export const PropertyProvider = ({ children }) => {
       .insert({
         property_id: propertyId,
         bill_type: 'rent',
+        tenant_id: tenantId,
         total_amount: totalCents / 100,
         billing_period_start: periodStart,
         billing_period_end: periodEnd,
@@ -1021,83 +1028,178 @@ export const PropertyProvider = ({ children }) => {
   // picks up a new rate automatically since it just reads whatever rate is in
   // force for each day. Silently skips a property/period with nothing
   // billable (no active tenant has a rate covering it yet).
-  const generateDueRentBills = async ({ properties: propsList, tenants: tenantsList, bills: billsList, rentRates: ratesList, settings }) => {
+  const generateDueRentBills = async ({
+    properties: propsList,
+    tenants: tenantsList,
+    bills: billsList,
+    billSplits: billSplitsList,
+    rentRates: ratesList,
+    settings,
+  }) => {
     if (rentGenerationInFlight.current) return;
     rentGenerationInFlight.current = true;
     try {
-      await generateDueRentBillsInner({ propsList, tenantsList, billsList, ratesList, settings });
+      await generateDueRentBillsInner({ propsList, tenantsList, billsList, billSplitsList, ratesList, settings });
     } finally {
       rentGenerationInFlight.current = false;
     }
   };
 
-  const generateDueRentBillsInner = async ({ propsList, tenantsList, billsList, ratesList, settings }) => {
+  const generateDueRentBillsInner = async ({ propsList, tenantsList, billsList, billSplitsList, ratesList, settings }) => {
     const now = new Date();
     const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const currentMonthStartStr = formatLocalDate(currentMonthStart);
+    const todayStr = formatLocalDate(now);
+
+    // Auto-email a just-generated split, but only if its bill's period
+    // actually contains today — shared with both generation paths below so
+    // the "silent history, live email for the current bill" rule behaves
+    // identically for monthly and per-tenant cadences.
+    const maybeAutoEmail = async (inserted, periodContainsToday, tenantsForLookup) => {
+      if (!periodContainsToday || settings?.notify_rent === false) return;
+      for (const split of inserted.splits) {
+        const tenant = tenantsForLookup.find((t) => t.id === split.tenant_id);
+        if (!tenant?.email) continue;
+        try {
+          await sendBillEmail(split.id);
+        } catch (err) {
+          console.error('Failed to auto-send rent bill email:', err);
+        }
+      }
+    };
 
     for (const property of propsList) {
       const propertyTenants = tenantsList.filter((t) => t.property_id === property.id && t.status !== 'former');
       if (propertyTenants.length === 0) continue;
 
-      // Build the list of calendar-month periods to check for this property,
-      // anchored to the earliest rent rate rather than a hardcoded constant.
-      const startMonth = earliestGenerationMonthForProperty(propertyTenants, ratesList);
-      const periods = buildGenerationPeriods(startMonth, currentMonthStart);
+      // 2026-08-17 (Chris's call): a tenant currently on 'weekly' or
+      // 'fortnightly' billing gets their own bills on that cadence instead
+      // of sharing the property-wide monthly bill everyone else gets.
+      // Cadence is read from each tenant's current (open-ended) rate —
+      // a tenant with no open rate, or one on 'monthly', stays on the
+      // existing shared path unchanged.
+      const currentRateFor = (tenantId) => ratesList.find((r) => r.tenant_id === tenantId && !r.effective_to);
+      const perTenantCadenceTenants = propertyTenants.filter((t) => {
+        const freq = currentRateFor(t.id)?.frequency;
+        return freq === 'weekly' || freq === 'fortnightly';
+      });
+      const monthlyTenants = propertyTenants.filter((t) => !perTenantCadenceTenants.includes(t));
 
-      for (const period of periods) {
-        const alreadyExists = billsList.some(
-          (b) =>
-            b.property_id === property.id &&
-            b.bill_type === 'rent' &&
-            b.billing_period_start === period.start &&
-            b.billing_period_end === period.end
-        );
-        if (alreadyExists) continue;
+      // ── Shared monthly path (unchanged behaviour for monthly tenants) ──
+      if (monthlyTenants.length > 0) {
+        const startMonth = earliestGenerationMonthForProperty(monthlyTenants, ratesList);
+        const periods = buildGenerationPeriods(startMonth, currentMonthStart);
 
-        const charges = buildRentCharges(propertyTenants, ratesList, period.start, period.end);
-        if (charges.length === 0) continue;
+        for (const period of periods) {
+          const alreadyExists = billsList.some(
+            (b) =>
+              b.property_id === property.id &&
+              b.bill_type === 'rent' &&
+              b.tenant_id == null &&
+              b.billing_period_start === period.start &&
+              b.billing_period_end === period.end
+          );
+          if (alreadyExists) continue;
 
-        // A rent bill needs a real due_date, not null — otherwise it can
-        // never be flagged overdue or trigger a reminder (effectiveStatus
-        // in src/lib/paymentStatus.js can't derive "overdue" without one),
-        // regardless of the tenant's rent frequency. Defaulting to the
-        // period's own end date is the safest choice: it's always a real,
-        // already-known date, and a landlord can still edit it per-bill.
-        let inserted;
-        try {
-          inserted = await insertRentBillRow(property.id, period.start, period.end, period.end, charges);
-        } catch (err) {
-          if (err.code === '23505') {
-            // Another concurrent run (StrictMode's double-invoke, or a
-            // second tab) already created this exact period's bill — the
-            // database's bills_unique_rent_period index is the real guard
-            // here, this is the expected, benign outcome of losing the race.
-          } else {
-            console.error('Failed to auto-generate rent bill:', err);
-          }
-          continue;
-        }
-        // Reflect this period's bill in the list we're iterating so a later
-        // loop iteration (next property, or a future call) doesn't re-check
-        // against stale data within this same run.
-        billsList = [...billsList, inserted.bill];
+          const charges = buildRentCharges(monthlyTenants, ratesList, period.start, period.end);
+          if (charges.length === 0) continue;
 
-        // Silent-history rule: only auto-email for the current calendar month.
-        // Historical backfill periods are generated silently so a landlord
-        // onboarding mid-year doesn't spam tenants with emails for rent that
-        // was already paid months ago.
-        const isCurrentMonth = period.start === currentMonthStartStr;
-        if (isCurrentMonth && settings?.notify_rent !== false) {
-          for (const split of inserted.splits) {
-            const tenant = propertyTenants.find((t) => t.id === split.tenant_id);
-            if (!tenant?.email) continue;
-            try {
-              await sendBillEmail(split.id);
-            } catch (err) {
-              console.error('Failed to auto-send rent bill email:', err);
+          // A rent bill needs a real due_date, not null — otherwise it can
+          // never be flagged overdue or trigger a reminder (effectiveStatus
+          // in src/lib/paymentStatus.js can't derive "overdue" without one).
+          // Defaulting to the period's own end date is the safest choice:
+          // it's always a real, already-known date, and a landlord can
+          // still edit it per-bill.
+          let inserted;
+          try {
+            inserted = await insertRentBillRow(property.id, period.start, period.end, period.end, charges);
+          } catch (err) {
+            if (err.code === '23505') {
+              // Another concurrent run (StrictMode's double-invoke, or a
+              // second tab) already created this exact period's bill — the
+              // database's bills_unique_rent_period index is the real
+              // guard here, this is the expected, benign outcome of
+              // losing the race.
+            } else {
+              console.error('Failed to auto-generate rent bill:', err);
             }
+            continue;
           }
+          // Reflect this period's bill in the list we're iterating so a
+          // later loop iteration doesn't re-check against stale data.
+          billsList = [...billsList, inserted.bill];
+
+          // Silent-history rule: only auto-email for the current calendar
+          // month. Historical backfill periods are generated silently so
+          // a landlord onboarding mid-year doesn't spam tenants with
+          // emails for rent that was already paid months ago.
+          await maybeAutoEmail(inserted, period.start === currentMonthStartStr, monthlyTenants);
+        }
+      }
+
+      // ── Per-tenant weekly/fortnightly path ──
+      for (const tenant of perTenantCadenceTenants) {
+        const stepDays = currentRateFor(tenant.id).frequency === 'weekly' ? 7 : 14;
+
+        // Resume from the day after the most recent bill that already
+        // covers this tenant (shared or per-tenant) — guarantees no
+        // overlap and no gap with bills generated before this tenant's
+        // cadence became per-tenant (e.g. an existing shared monthly bill
+        // that already covers days now nominally in a "fortnightly"
+        // period). Purely forward-looking; nothing already generated is
+        // ever touched.
+        const existingEnds = billsList
+          .filter((b) => b.bill_type === 'rent')
+          .flatMap((b) => {
+            // Shared bills: this tenant is covered if a split for them
+            // exists on it. Per-tenant bills: covered if it's theirs.
+            const coversTenant =
+              b.tenant_id === tenant.id ||
+              (b.tenant_id == null &&
+                billSplitsList.some((s) => s.bill_id === b.id && s.tenant_id === tenant.id));
+            return coversTenant ? [b.billing_period_end] : [];
+          });
+        const resumeFrom = nextPerTenantRentStartDate(tenant.move_in_date, existingEnds);
+        if (resumeFrom > todayStr) continue; // nothing due yet
+
+        const periods = buildSteppedPeriods(resumeFrom, todayStr, stepDays);
+
+        for (const period of periods) {
+          const alreadyExists = billsList.some(
+            (b) =>
+              b.tenant_id === tenant.id &&
+              b.bill_type === 'rent' &&
+              b.billing_period_start === period.start &&
+              b.billing_period_end === period.end
+          );
+          if (alreadyExists) continue;
+
+          const charges = buildRentCharges([tenant], ratesList, period.start, period.end);
+          if (charges.length === 0) continue;
+
+          let inserted;
+          try {
+            inserted = await insertRentBillRow(
+              property.id,
+              period.start,
+              period.end,
+              period.end,
+              charges,
+              tenant.id
+            );
+          } catch (err) {
+            if (err.code === '23505') {
+              // Same benign concurrent-run race as the shared path, guarded
+              // here by bills_unique_rent_period_per_tenant instead.
+            } else {
+              console.error('Failed to auto-generate per-tenant rent bill:', err);
+            }
+            continue;
+          }
+          billsList = [...billsList, inserted.bill];
+
+          const periodContainsToday = period.start <= todayStr && todayStr <= period.end;
+          await maybeAutoEmail(inserted, periodContainsToday, [tenant]);
         }
       }
     }

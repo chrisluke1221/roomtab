@@ -50,3 +50,48 @@ export const buildGenerationPeriods = (startMonth, currentMonthStart) => {
   }
   return periods;
 };
+
+// 2026-08-17: per-tenant billing cadence (Chris's call) — a tenant on
+// 'weekly' or 'fortnightly' billing gets their own bills on that cadence
+// instead of sharing the property-wide monthly bill. Operates on
+// 'YYYY-MM-DD' strings throughout, constructing Date objects only via the
+// local (y, m, d) constructor — never `new Date('YYYY-MM-DD')`, which
+// parses as UTC and can shift a day in any timezone ahead of UTC (the same
+// bug class formatLocalDate exists to avoid).
+const addDays = (dateStr, days) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + days);
+  return formatLocalDate(date);
+};
+
+// Fixed-length, non-overlapping, gapless periods of `stepDays` days each,
+// starting at startDateStr, up to and including whichever period contains
+// throughDateStr (so the in-progress current period is always included,
+// matching buildGenerationPeriods' "always at least the current period"
+// behaviour for the monthly path).
+export const buildSteppedPeriods = (startDateStr, throughDateStr, stepDays) => {
+  const periods = [];
+  let cursor = startDateStr;
+  while (cursor <= throughDateStr) {
+    const end = addDays(cursor, stepDays - 1);
+    periods.push({ start: cursor, end });
+    cursor = addDays(cursor, stepDays);
+  }
+  return periods;
+};
+
+// Where per-tenant generation should resume from for a given tenant: the
+// day after the most recent rent bill that already covers them (shared or
+// per-tenant), or their move-in date if they have no rent bill history at
+// all. This is what guarantees no overlap and no gap with bills that were
+// already generated before a tenant's cadence became per-tenant (e.g. an
+// existing shared monthly bill that already covers days now nominally in
+// a "fortnightly" period) — per-tenant generation only ever starts fresh
+// after the last thing that already billed them, never retroactively.
+export const nextPerTenantRentStartDate = (tenantMoveInDate, existingRentBillingPeriodEnds) => {
+  if (existingRentBillingPeriodEnds.length === 0) return tenantMoveInDate;
+  const latestEnd = existingRentBillingPeriodEnds.reduce((latest, end) => (end > latest ? end : latest));
+  const resumeDate = addDays(latestEnd, 1);
+  return resumeDate > tenantMoveInDate ? resumeDate : tenantMoveInDate;
+};

@@ -69,6 +69,11 @@ const TenantDetail = () => {
   // landlord jump straight to a specific FY (the unit they actually think
   // in for tax/reporting) beats paging through everything chronologically.
   const [rentYearFilter, setRentYearFilter] = useState('all');
+  // 2026-08-17: bulk-select, mirroring Dashboard.js's work-queue bulk mark-
+  // paid — Chris flagged this per-tenant Rent/Utilities list had no way to
+  // select and settle more than one bill at a time.
+  const [selectedSplitIds, setSelectedSplitIds] = useState([]);
+  const [bulkMarking, setBulkMarking] = useState(false);
   const [utilYearFilter, setUtilYearFilter] = useState('all');
 
   if (loading) {
@@ -233,6 +238,31 @@ const TenantDetail = () => {
 
   const tenantById = (id) => tenants.find((t) => t.id === id);
 
+  const toggleSelectSplit = (splitId) => {
+    setSelectedSplitIds((prev) =>
+      prev.includes(splitId) ? prev.filter((id) => id !== splitId) : [...prev, splitId]
+    );
+  };
+
+  const handleBulkMarkPaid = async (rows) => {
+    const ids = rows.map(({ split }) => split.id).filter((id) => selectedSplitIds.includes(id));
+    if (ids.length === 0) return;
+    if (!window.confirm(`Mark ${ids.length} bill${ids.length === 1 ? '' : 's'} as paid?`)) return;
+    setBulkMarking(true);
+    setEmailError('');
+    try {
+      for (const id of ids) {
+        await setBillSplitStatus(id, 'paid');
+      }
+      setSelectedSplitIds((prev) => prev.filter((id) => !ids.includes(id)));
+    } catch (err) {
+      console.error('Bulk mark-paid failed:', err);
+      setEmailError(err.message || 'Failed to mark some bills as paid');
+    } finally {
+      setBulkMarking(false);
+    }
+  };
+
   const handleRevokeLink = async (split) => {
     if (!window.confirm(`Revoke ${split.tenant_name}'s current bill link? The old link will stop working immediately.`)) return false;
     await revokeSplitToken(split.id);
@@ -267,6 +297,13 @@ const TenantDetail = () => {
       <React.Fragment key={split.id}>
         {/* Desktop row */}
         <tr className="hidden sm:table-row border-b border-secondary-100 last:border-0">
+          <td className="py-2 pr-2 w-6">
+            <input
+              type="checkbox"
+              checked={selectedSplitIds.includes(split.id)}
+              onChange={() => toggleSelectSplit(split.id)}
+            />
+          </td>
           <td className="py-2 pr-4">
             <p className="text-sm font-medium text-secondary-900">{bill.billing_period_start} to {bill.billing_period_end}</p>
             {bill.bill_type !== 'rent' && (
@@ -323,7 +360,7 @@ const TenantDetail = () => {
         {/* Rate breakdown expansion row (desktop) */}
         {split.rate_breakdown && expandedBreakdownSplitId === split.id && (
           <tr className="hidden sm:table-row bg-secondary-50">
-            <td colSpan={4} className="py-2 px-3">
+            <td colSpan={5} className="py-2 px-3">
               <ul className="text-xs text-secondary-600 space-y-1">
                 {split.rate_breakdown.map((seg, i) => (
                   <li key={i} className="flex justify-between">
@@ -340,17 +377,24 @@ const TenantDetail = () => {
         )}
         {expandedActivitySplitId === split.id && (
           <tr className="hidden sm:table-row bg-secondary-50">
-            <td colSpan={4} className="py-2 px-3">
+            <td colSpan={5} className="py-2 px-3">
               <BillActivityTimeline billId={bill.id} />
             </td>
           </tr>
         )}
         {/* Mobile card */}
         <tr className="sm:hidden">
-          <td colSpan={4} className="py-2">
+          <td colSpan={5} className="py-2">
             <div className="border border-secondary-200 rounded-lg p-3">
               <div className="flex items-start justify-between mb-2">
-                <div>
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={selectedSplitIds.includes(split.id)}
+                    onChange={() => toggleSelectSplit(split.id)}
+                  />
+                  <div>
                   <p className="text-sm font-medium text-secondary-900">
                     {bill.billing_period_start} to {bill.billing_period_end}
                   </p>
@@ -365,6 +409,7 @@ const TenantDetail = () => {
                       Due {bill.due_date}
                     </p>
                   )}
+                  </div>
                 </div>
                 <div className="text-right">
                   <Money dollars={split.owed_amount} as="p" className="text-secondary-900 block mb-1" />
@@ -457,10 +502,40 @@ const TenantDetail = () => {
           </div>
         ) : (
           <>
+            {/* Bulk mark-paid — mirrors Dashboard.js's work-queue bulk action */}
+            <div className="flex items-center space-x-3 mb-2 text-sm">
+              <label className="flex items-center space-x-2 text-secondary-500 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={visible.length > 0 && visible.every(({ split }) => selectedSplitIds.includes(split.id))}
+                  onChange={(e) => {
+                    const visibleIds = visible.map(({ split }) => split.id);
+                    setSelectedSplitIds((prev) =>
+                      e.target.checked
+                        ? [...new Set([...prev, ...visibleIds])]
+                        : prev.filter((id) => !visibleIds.includes(id))
+                    );
+                  }}
+                />
+                <span>Select all</span>
+              </label>
+              {selectedSplitIds.some((id) => rows.some(({ split }) => split.id === id)) && (
+                <button
+                  onClick={() => handleBulkMarkPaid(rows)}
+                  disabled={bulkMarking}
+                  className="text-primary-600 hover:text-primary-700 font-medium disabled:opacity-50"
+                >
+                  {bulkMarking
+                    ? 'Marking...'
+                    : `Mark ${selectedSplitIds.filter((id) => rows.some(({ split }) => split.id === id)).length} as paid`}
+                </button>
+              )}
+            </div>
             <div className="card p-0 overflow-hidden">
               <table className="w-full">
                 <thead className="hidden sm:table-header-group">
                   <tr className="text-left text-xs text-secondary-500 border-b border-secondary-200">
+                    <th className="py-2 pl-4 w-6"></th>
                     <th className="py-2 px-4">Period</th>
                     <th className="py-2 px-4 text-right">Owed</th>
                     <th className="py-2 px-4 text-center">Status</th>
