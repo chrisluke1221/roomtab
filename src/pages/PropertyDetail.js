@@ -37,6 +37,7 @@ const emptyTenant = {
   room: '',
   moveInDate: '',
   moveOutDate: '',
+  fixedTermEnd: '',
   numberOfOccupants: 1,
   rentAmount: '',
   rentFrequency: 'weekly',
@@ -437,6 +438,7 @@ const PropertyDetail = () => {
           room: tenantForm.room.trim(),
           move_in_date: tenantForm.moveInDate,
           move_out_date: tenantForm.moveOutDate || null,
+          fixed_term_end: tenantForm.fixedTermEnd || null,
           number_of_occupants: tenantForm.numberOfOccupants,
         });
         if (shouldCreateRate) {
@@ -499,6 +501,7 @@ const PropertyDetail = () => {
       room: tenant.room,
       moveInDate: tenant.move_in_date,
       moveOutDate: tenant.move_out_date || '',
+      fixedTermEnd: tenant.fixed_term_end || '',
       numberOfOccupants: tenant.number_of_occupants,
       rentAmount: currentRate ? String(currentRate.amount_cents / 100) : '',
       rentFrequency: currentRate ? currentRate.frequency : 'weekly',
@@ -1441,6 +1444,20 @@ const PropertyDetail = () => {
                 />
               </div>
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-secondary-900 mb-1.5">Lease end date (optional)</label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={tenantForm.fixedTermEnd}
+                  onChange={(e) => setTenantForm((p) => ({ ...p, fixedTermEnd: e.target.value }))}
+                />
+                <p className="text-xs text-secondary-400 mt-1">
+                  When their current lease term expires — separate from move-out, since a lease can be extended.
+                </p>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-secondary-100">
               <div>
                 <label className="block text-sm font-medium text-secondary-900 mb-1.5">Rent per week</label>
@@ -1506,6 +1523,9 @@ const PropertyDetail = () => {
                   <p className="text-sm text-secondary-500">Moved in: {tenant.move_in_date}</p>
                   {tenant.move_out_date && (
                     <p className="text-sm text-secondary-500">Moves out: {tenant.move_out_date}</p>
+                  )}
+                  {tenant.fixed_term_end && (
+                    <p className="text-sm text-secondary-500">Lease ends: {tenant.fixed_term_end}</p>
                   )}
                   <div className="mt-3 pt-3 border-t border-secondary-100">
                     <p className="text-sm text-secondary-700">
