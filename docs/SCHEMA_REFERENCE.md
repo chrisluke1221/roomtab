@@ -68,6 +68,7 @@ columns in the schema: `rent_rates.amount_cents`, `plans.price_cents_monthly`,
 | `locked_at` | timestamptz | nullable — set on first send for a utility bill; blocks silent recompute |
 | `needs_reissue` | boolean | default false |
 | `landlord_id` | uuid | → `auth.users(id)` |
+| `tenant_id` | uuid | nullable → `tenants(id)` — set **only** on a per-tenant-cadence rent bill (weekly/fortnightly billing); null for every shared bill (all utility bills, monthly-cadence rent bills). Two separate partial unique indexes on `(property_id, billing_period_start, billing_period_end)` (`tenant_id is null`) and `(tenant_id, billing_period_start, billing_period_end)` (`tenant_id is not null`) dedupe the two paths independently |
 | `created_at` / `updated_at` | timestamptz | |
 
 ## `public.bill_splits`

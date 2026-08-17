@@ -1,4 +1,9 @@
-import { earliestGenerationMonthForProperty, buildGenerationPeriods } from './rentGeneration';
+import {
+  earliestGenerationMonthForProperty,
+  buildGenerationPeriods,
+  buildSteppedPeriods,
+  nextPerTenantRentStartDate,
+} from './rentGeneration';
 
 // Fixed "today" used across all tests so assertions don't drift with calendar.
 // 2026-07-23 — the date this test suite was written.
@@ -147,5 +152,63 @@ describe('buildGenerationPeriods', () => {
     expect(periods).toHaveLength(2);
     expect(periods[0]).toEqual({ start: '2025-12-01', end: '2025-12-31' });
     expect(periods[1]).toEqual({ start: '2026-01-01', end: '2026-01-31' });
+  });
+});
+
+// ─── buildSteppedPeriods ──────────────────────────────────────────────────────
+
+describe('buildSteppedPeriods', () => {
+  test('weekly (7-day) periods are gapless and non-overlapping', () => {
+    const periods = buildSteppedPeriods('2026-08-01', '2026-08-21', 7);
+    expect(periods).toEqual([
+      { start: '2026-08-01', end: '2026-08-07' },
+      { start: '2026-08-08', end: '2026-08-14' },
+      { start: '2026-08-15', end: '2026-08-21' },
+    ]);
+  });
+
+  test('fortnightly (14-day) periods are gapless and non-overlapping', () => {
+    const periods = buildSteppedPeriods('2026-08-01', '2026-08-28', 14);
+    expect(periods).toEqual([
+      { start: '2026-08-01', end: '2026-08-14' },
+      { start: '2026-08-15', end: '2026-08-28' },
+    ]);
+  });
+
+  test('always includes the in-progress period containing throughDateStr', () => {
+    const periods = buildSteppedPeriods('2026-08-01', '2026-08-10', 14);
+    expect(periods).toEqual([{ start: '2026-08-01', end: '2026-08-14' }]);
+  });
+
+  test('correctly steps across a month boundary', () => {
+    const periods = buildSteppedPeriods('2026-08-25', '2026-09-08', 7);
+    expect(periods).toEqual([
+      { start: '2026-08-25', end: '2026-08-31' },
+      { start: '2026-09-01', end: '2026-09-07' },
+      { start: '2026-09-08', end: '2026-09-14' },
+    ]);
+  });
+});
+
+// ─── nextPerTenantRentStartDate ───────────────────────────────────────────────
+
+describe('nextPerTenantRentStartDate', () => {
+  test('starts from move-in date when the tenant has no rent bill history', () => {
+    expect(nextPerTenantRentStartDate('2026-01-10', [])).toBe('2026-01-10');
+  });
+
+  test('resumes the day after the most recent existing bill period end', () => {
+    expect(nextPerTenantRentStartDate('2026-01-10', ['2026-08-31'])).toBe('2026-09-01');
+  });
+
+  test('uses the latest end across multiple existing bills, not the first', () => {
+    expect(
+      nextPerTenantRentStartDate('2026-01-10', ['2026-06-30', '2026-08-31', '2026-07-31'])
+    ).toBe('2026-09-01');
+  });
+
+  test('never resumes before the tenant actually moved in', () => {
+    // Pathological/defensive case: existing bill data somehow predates move-in.
+    expect(nextPerTenantRentStartDate('2026-08-15', ['2026-01-31'])).toBe('2026-08-15');
   });
 });
