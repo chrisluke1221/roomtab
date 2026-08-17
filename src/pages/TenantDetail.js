@@ -18,7 +18,7 @@ import SplitActions from '../components/SplitActions';
 import BillActivityTimeline from '../components/BillActivityTimeline';
 import { effectiveStatus, isOutstanding } from '../lib/paymentStatus';
 import { amountForFrequency } from '../lib/rentCalc';
-import { todayLocal } from '../lib/dates';
+import { todayLocal, financialYearFor } from '../lib/dates';
 import ConfirmModal from '../components/ConfirmModal';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -64,6 +64,12 @@ const TenantDetail = () => {
   const PAGE_SIZE = 10;
   const [rentPage, setRentPage] = useState(1);
   const [utilPage, setUtilPage] = useState(1);
+  // 2026-08-13: financial-year filter — "10 rows max" pagination alone
+  // wasn't enough once a tenant has multiple years of history; letting the
+  // landlord jump straight to a specific FY (the unit they actually think
+  // in for tax/reporting) beats paging through everything chronologically.
+  const [rentYearFilter, setRentYearFilter] = useState('all');
+  const [utilYearFilter, setUtilYearFilter] = useState('all');
 
   if (loading) {
     return (
@@ -200,13 +206,30 @@ const TenantDetail = () => {
     .map((s) => ({ split: s, bill: bills.find((b) => b.id === s.bill_id) }))
     .filter((row) => row.bill);
 
-  const rentRows = tenantSplits
+  const allRentRows = tenantSplits
     .filter((row) => row.bill.bill_type === 'rent')
     .sort((a, b) => b.bill.billing_period_start.localeCompare(a.bill.billing_period_start));
 
-  const utilRows = tenantSplits
+  const allUtilRows = tenantSplits
     .filter((row) => row.bill.bill_type !== 'rent')
     .sort((a, b) => b.bill.billing_period_start.localeCompare(a.bill.billing_period_start));
+
+  // Distinct financial years actually present in this tenant's history,
+  // most recent first — only offered as filter options if there's more
+  // than one, since a single-FY tenant has nothing to filter.
+  const financialYearsFor = (rows) =>
+    [...new Set(rows.map((row) => financialYearFor(row.bill.billing_period_start)))].sort().reverse();
+  const rentFinancialYears = financialYearsFor(allRentRows);
+  const utilFinancialYears = financialYearsFor(allUtilRows);
+
+  const rentRows =
+    rentYearFilter === 'all'
+      ? allRentRows
+      : allRentRows.filter((row) => financialYearFor(row.bill.billing_period_start) === rentYearFilter);
+  const utilRows =
+    utilYearFilter === 'all'
+      ? allUtilRows
+      : allUtilRows.filter((row) => financialYearFor(row.bill.billing_period_start) === utilYearFilter);
 
   const tenantById = (id) => tenants.find((t) => t.id === id);
 
@@ -400,16 +423,33 @@ const TenantDetail = () => {
     );
   };
 
-  const renderSection = (rows, page, setPage, icon, title, emptyMsg) => {
+  const renderSection = (rows, page, setPage, icon, title, emptyMsg, yearOptions, yearFilter, setYearFilter) => {
     const visible = rows.slice(0, page * PAGE_SIZE);
     const hasMore = rows.length > visible.length;
     return (
       <section className="mb-10">
-        <h2 className="text-sm font-semibold text-secondary-500 uppercase tracking-wide mb-3 flex items-center">
-          {icon}
-          <span className="ml-2">{title}</span>
-          <span className="ml-2 text-secondary-400 font-normal normal-case">({rows.length})</span>
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-secondary-500 uppercase tracking-wide flex items-center">
+            {icon}
+            <span className="ml-2">{title}</span>
+            <span className="ml-2 text-secondary-400 font-normal normal-case">({rows.length})</span>
+          </h2>
+          {yearOptions.length > 1 && (
+            <select
+              className="input-field text-sm py-1.5"
+              value={yearFilter}
+              onChange={(e) => {
+                setYearFilter(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="all">All years</option>
+              {yearOptions.map((fy) => (
+                <option key={fy} value={fy}>FY {fy}</option>
+              ))}
+            </select>
+          )}
+        </div>
         {rows.length === 0 ? (
           <div className="card text-center py-8">
             <Inbox className="w-8 h-8 text-secondary-300 mx-auto mb-2" />
@@ -649,7 +689,10 @@ const TenantDetail = () => {
         setRentPage,
         <DollarSign className="w-4 h-4" />,
         'Rent',
-        'No rent bills for this tenant yet.'
+        'No rent bills for this tenant yet.',
+        rentFinancialYears,
+        rentYearFilter,
+        setRentYearFilter
       )}
 
       {/* Utility splits */}
@@ -659,7 +702,10 @@ const TenantDetail = () => {
         setUtilPage,
         <Zap className="w-4 h-4" />,
         'Utilities',
-        'No utility bills for this tenant yet.'
+        'No utility bills for this tenant yet.',
+        utilFinancialYears,
+        utilYearFilter,
+        setUtilYearFilter
       )}
     </div>
   );

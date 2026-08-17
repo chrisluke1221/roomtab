@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { computeSplits, computeFlatSplitByHeadcount, usesFlatSplit } from '../lib/billSplit';
 import { computeRentForPeriod, ratesOverlap, findOverlappingRate } from '../lib/rentCalc';
 import { earliestGenerationMonthForProperty, buildGenerationPeriods } from '../lib/rentGeneration';
-import { formatLocalDate } from '../lib/dates';
+import { formatLocalDate, todayLocal } from '../lib/dates';
 import { EntitlementError } from '../lib/entitlements';
 
 const PropertyContext = createContext();
@@ -1230,6 +1230,35 @@ export const PropertyProvider = ({ children }) => {
     return data;
   };
 
+  // 2026-08-13: for a newly added tenant whose move-in date is in the past,
+  // the auto-generation engine silently backfills rent bills for every month
+  // since then (see generateDueRentBillsInner's "silent-history rule") —
+  // Chris flagged that landing on a wall of pre-existing "overdue" bills for
+  // rent that was actually already settled is confusing/misleading. Rather
+  // than guess, the landlord is asked once at tenant-creation time; if they
+  // confirm it's already settled, this bulk-marks every backfilled rent
+  // split (bill period already ended, not already paid) — reusing
+  // setBillSplitStatus per-row so the exact same paid_at/bill_events/local-
+  // state update happens as a single manual Mark Paid click would.
+  // Queries Supabase directly (not local billSplits state) since this runs
+  // immediately after a refresh() that generated these bills server-side —
+  // the local context arrays won't include them until a subsequent refresh.
+  const markPastRentSettled = async (tenantId) => {
+    const todayStr = todayLocal();
+    const { data: rows, error } = await supabase
+      .from('bill_splits')
+      .select('id, bills!inner(bill_type, billing_period_end)')
+      .eq('tenant_id', tenantId)
+      .eq('bills.bill_type', 'rent')
+      .lte('bills.billing_period_end', todayStr)
+      .neq('status', 'paid');
+    if (error) throw error;
+    for (const row of rows || []) {
+      await setBillSplitStatus(row.id, 'paid');
+    }
+    return (rows || []).length;
+  };
+
   // Round 2: landlord records what a tenant actually paid against a split —
   // full or partial. Auto-flips status to 'paid' once amount_paid covers
   // owed_amount; otherwise status is untouched and the UI derives "Partial"
@@ -1383,6 +1412,7 @@ export const PropertyProvider = ({ children }) => {
     refresh,
     fetchBillEvents,
     setBillSplitStatus,
+    markPastRentSettled,
     recordPartialPayment,
     sendBillEmail,
     revokeSplitToken,
